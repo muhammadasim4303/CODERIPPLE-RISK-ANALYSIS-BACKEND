@@ -37,11 +37,24 @@ def is_test_file(filename: str) -> bool:
 
 def is_critical_file(filename: str) -> bool:
     fname = filename.lower()
+
+    # Non-code files can never be critical — they do not execute
+    NON_CODE_EXTENSIONS = {
+        ".html", ".htm", ".css", ".scss", ".sass", ".less",
+        ".md", ".rst", ".txt", ".pdf",
+        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+        ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env",
+        ".csv", ".xml", ".lock", ".log",
+    }
+    ext = "." + fname.rsplit(".", 1)[-1] if "." in fname else ""
+    if ext in NON_CODE_EXTENSIONS:
+        return False
+
     critical_patterns = [
         "auth", "security", "payment", "login", "password",
         "config", "settings", "database", "db", "migration",
         "secret", "token", "key", "credential", "api",
-        "main", "app", "server", "index", "core", "base",
+        "main", "app", "server", "core", "base",
         "middleware", "router", "route", "controller",
     ]
     return any(p in fname for p in critical_patterns)
@@ -208,7 +221,12 @@ def extract_features(data: dict) -> dict:
     exception_changes = exception_added + exception_removed
 
     # ── Public API ────────────────────────────────────────────────────────
-    if not is_test_only:
+    # Only meaningful for actual code files — skip markup/style/config
+    _markup_exts = {'.html', '.htm', '.css', '.scss', '.sass', '.less',
+                    '.md', '.rst', '.txt', '.xml', '.svg', '.json',
+                    '.yaml', '.yml', '.toml', '.ini', '.cfg', '.lock'}
+    _is_markup = ('.' + filename.lower().rsplit('.', 1)[-1] if '.' in filename else '') in _markup_exts
+    if not is_test_only and not _is_markup:
         public_api_added   = len(re.findall(r'^\+.*\b(def|function|class|public|export)\b', patch, re.MULTILINE))
         public_api_removed = len(re.findall(r'^-.*\b(def|function|class|public|export)\b',  patch, re.MULTILINE))
     else:
@@ -217,9 +235,30 @@ def extract_features(data: dict) -> dict:
     public_api_modified = int(public_api_added > 0 or public_api_removed > 0)
 
     # ── Security patterns ─────────────────────────────────────────────────
-    security_pattern_hits = len(re.findall(
-        r'\b(password|token|secret|api_key|private_key|auth|credential|sql|query|eval|exec)\b',
-        patch, re.IGNORECASE))
+    _fname_ext_sec = ('.' + filename.lower().rsplit('.', 1)[-1]) if '.' in filename else ''
+    _pure_markup = {'.css', '.scss', '.sass', '.less', '.md', '.rst', '.txt',
+                    '.yaml', '.yml', '.toml', '.ini', '.cfg', '.lock', '.svg'}
+
+    if _fname_ext_sec in _pure_markup:
+        # Pure markup/style/config — no executable code, skip entirely
+        security_pattern_hits = 0
+    elif _fname_ext_sec in ('.html', '.htm'):
+        # HTML can contain dangerous JS — scan only for executable patterns
+        # specifically: credential exfil, eval, dangerous fetch/XHR patterns
+        security_pattern_hits = len(re.findall(
+            r'(JSON\.stringify\s*\(\s*\{[^}]*(password|passwd|pwd|username|user)[^}]*\}|'
+            r'\beval\s*\(|'
+            r'fetch\s*\([^)]*login|'
+            r'XMLHttpRequest|'
+            r'\.src\s*=|'
+            r'document\.cookie|'
+            r'localStorage\.setItem)',
+            patch, re.IGNORECASE))
+    else:
+        # Real code files — full scan
+        security_pattern_hits = len(re.findall(
+            r'\b(password|token|secret|api_key|private_key|auth|credential|sql|query|eval|exec)\b',
+            patch, re.IGNORECASE))
 
     # ── Structure changes ─────────────────────────────────────────────────
     structure_changes = (

@@ -1,0 +1,9 @@
+venv/
+backend/venv/
+__pycache__/
+*.pyc
+*.pkl
+*.pt
+*.h5
+*.log
+.env
