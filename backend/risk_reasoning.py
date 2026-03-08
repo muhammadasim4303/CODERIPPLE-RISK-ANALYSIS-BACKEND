@@ -1,0 +1,247 @@
+"""
+Generates human-readable risk reasons from extracted features.
+These are rule-based explanations that complement the model's prediction.
+"""
+
+
+def generate_risk_reasons(features: dict, risk_label: str, risk_score: float) -> list:
+    reasons = []
+    meta    = features.get("_meta", {})
+
+    # ── Security ────────────────────────────────────────────────────────
+    sec_hits = features.get("security_pattern_hits", 0)
+    if sec_hits >= 15:
+        reasons.append(
+            f"CRITICAL: Extremely high concentration of security-sensitive patterns "
+            f"({sec_hits} hits) — auth, credentials, SQL, tokens detected"
+        )
+    elif sec_hits >= 8:
+        reasons.append(
+            f"High-risk security patterns detected ({sec_hits} hits) — "
+            "auth/token/password/SQL patterns present"
+        )
+    elif sec_hits > 0:
+        reasons.append(
+            f"Security-sensitive keywords detected "
+            f"(auth/token/password/SQL patterns: {sec_hits} hits)"
+        )
+
+    if meta.get("critical_file_names"):
+        names = ", ".join(meta["critical_file_names"][:3])
+        reasons.append(f"Critical/core files modified: {names}")
+
+    # ── High-danger combos ────────────────────────────────────────────────
+    if (sec_hits >= 5 and
+            features.get("no_test_coverage", 0) and
+            features.get("critical_files_count", 0) > 0):
+        reasons.append(
+            "Dangerous combination: security-sensitive code in critical file with no test coverage"
+        )
+
+    if (features.get("public_api_added", 0) >= 3 and
+            features.get("no_test_coverage", 0) and
+            sec_hits >= 3):
+        reasons.append(
+            f"Multiple new public functions ({features.get('public_api_added', 0)}) "
+            "added to security module with no tests"
+        )
+
+    # ── Complexity ───────────────────────────────────────────────────────
+    cyc_delta = features.get("cyclomatic_complexity_delta", 0)
+    if cyc_delta > 5:
+        reasons.append(
+            f"Cyclomatic complexity increased significantly (+{cyc_delta}), "
+            "raising the chance of untested code paths"
+        )
+    elif cyc_delta > 2:
+        reasons.append(f"Cyclomatic complexity increased by {cyc_delta}")
+
+    time_delta = features.get("time_complexity_delta", 0)
+    if time_delta > 1:
+        reasons.append(
+            f"Estimated time complexity worsened by {time_delta} orders "
+            "(possible performance regression)"
+        )
+
+    # ── Change size ──────────────────────────────────────────────────────
+    added = features.get("added_lines", 0)
+    if added > 300:
+        reasons.append(
+            f"Large addition of {added} lines increases review surface area"
+        )
+
+    diff_size = features.get("diff_size", 0)
+    if diff_size > 500:
+        reasons.append(
+            f"Diff size ({diff_size} lines) is very large — higher integration risk"
+        )
+
+    # ── API changes ──────────────────────────────────────────────────────
+    api_break = features.get("api_breaking_signal", 0)
+    if api_break > 0:
+        reasons.append(
+            f"Public API breaking change detected "
+            f"({features.get('public_api_removed', 0)} removed, "
+            f"{features.get('public_api_modified', 0)} modified)"
+        )
+    elif features.get("api_change_total", 0) > 0:
+        reasons.append(
+            f"Public API surface changed ({features.get('api_change_total', 0)} modifications)"
+        )
+
+    # ── Dependencies ─────────────────────────────────────────────────────
+    if features.get("has_new_deps", 0):
+        reasons.append(
+            f"New dependencies introduced "
+            f"({features.get('import_added', 0)} imports added)"
+        )
+
+    dep_changes = features.get("dependency_changes", 0)
+    if dep_changes > 5:
+        reasons.append(f"High dependency churn ({dep_changes} import changes)")
+
+    # ── Test coverage ────────────────────────────────────────────────────
+    if features.get("no_test_coverage", 0):
+        reasons.append(
+            "Production code changed with no corresponding test file modifications"
+        )
+
+    if features.get("is_test_only", 0):
+        reasons.append("Change affects only test files (lower production risk)")
+
+    # ── Structural ───────────────────────────────────────────────────────
+    structural_risk = features.get("structural_risk", 0)
+    if structural_risk > 20:
+        reasons.append(
+            f"High structural complexity score ({structural_risk:.0f}) — "
+            "many branch/structure changes"
+        )
+
+    depth_change = features.get("depth_change", 0)
+    if abs(depth_change) > 8:
+        reasons.append(
+            f"Significant nesting depth change ({depth_change:+d} indentation levels)"
+        )
+
+    # ── Code similarity ──────────────────────────────────────────────────
+    sim = features.get("code_similarity", 1.0)
+    if sim < 0.3:
+        reasons.append(
+            f"Low code similarity ({sim:.0%}) — file was substantially rewritten"
+        )
+    elif sim < 0.6:
+        reasons.append(
+            f"Moderate code similarity ({sim:.0%}) — significant refactoring detected"
+        )
+
+    # ── Exceptions ──────────────────────────────────────────────────────
+    exc_net = features.get("exception_net", 0)
+    if exc_net < -2:
+        reasons.append(
+            f"Exception handling reduced (net {exc_net}) — error handling may have regressed"
+        )
+    elif exc_net > 3:
+        reasons.append(
+            f"Many new exception handlers added ({exc_net:+d}) — review for correctness"
+        )
+
+    # ── Default fallback if no specific reason found ─────────────────────
+    if not reasons:
+        if risk_label in ("HIGH RISK",):
+            reasons.append(
+                f"Model predicts high risk (score {risk_score:.2f}) based on "
+                "combined structural and complexity signals"
+            )
+        elif risk_label == "MEDIUM RISK":
+            reasons.append(
+                f"Moderate risk profile (score {risk_score:.2f}) — "
+                "review recommended but not critical"
+            )
+        else:
+            reasons.append(
+                f"Low risk change (score {risk_score:.2f}) — "
+                "minimal complexity and structural impact"
+            )
+
+    return reasons[:6]   # cap at 6 reasons for UI clarity
+
+
+def derive_risk_categories(features: dict) -> dict:
+    """
+    Heuristic sub-scores for correctness / security / maintainability / integration.
+    These mirror the training labels but are computed rule-based for display.
+    """
+    # Security
+    sec = min(1.0, (
+        features.get("security_pattern_hits", 0) * 0.15 +
+        features.get("critical_files_count", 0) * 0.2 +
+        features.get("has_new_deps", 0) * 0.1
+    ))
+
+    # Correctness (test coverage signal + complexity)
+    cor = min(1.0, (
+        features.get("no_test_coverage", 0) * 0.3 +
+        max(0, features.get("cyclomatic_complexity_delta", 0)) * 0.05 +
+        features.get("code_dissimilarity", 0) * 0.3
+    ))
+
+    # Maintainability
+    mai = min(1.0, (
+        max(0, features.get("cyclomatic_delta", 0)) * 0.05 +
+        features.get("structural_risk", 0) * 0.01 +
+        features.get("comment_delta", 0) * -0.02 +  # more comments = better
+        features.get("log_diff_size", 0) * 0.05
+    ))
+
+    # Integration
+    intg = min(1.0, (
+        features.get("api_breaking_signal", 0) * 0.3 +
+        features.get("dependency_changes", 0) * 0.05 +
+        features.get("files_touched", 1) * 0.05
+    ))
+
+    # ── Per-category reasons ──────────────────────────────────────────────
+    sec_reasons = []
+    if features.get("security_pattern_hits", 0) > 0:
+        sec_reasons.append(f"Security-sensitive patterns detected ({features['security_pattern_hits']} hits)")
+    if features.get("critical_files_count", 0) > 0:
+        sec_reasons.append("Critical file(s) modified (auth/api/config/db)")
+    if features.get("has_new_deps", 0):
+        sec_reasons.append("New external dependencies introduced")
+
+    cor_reasons = []
+    if features.get("no_test_coverage", 0):
+        cor_reasons.append("No test files modified alongside production code")
+    if features.get("cyclomatic_complexity_delta", 0) > 2:
+        cor_reasons.append(f"Cyclomatic complexity increased by {features['cyclomatic_complexity_delta']}")
+    if features.get("code_dissimilarity", 0) > 0.7:
+        cor_reasons.append(f"High code dissimilarity ({features['code_dissimilarity']:.0%}) — large rewrite")
+
+    mai_reasons = []
+    if features.get("cyclomatic_delta", 0) > 2:
+        mai_reasons.append(f"Branch complexity increased (+{features['cyclomatic_delta']})")
+    if features.get("structural_risk", 0) > 10:
+        mai_reasons.append(f"High structural risk score ({features['structural_risk']})")
+    if features.get("comment_delta", 0) < -2:
+        mai_reasons.append("Comments removed — reduced code documentation")
+    if features.get("log_diff_size", 0) > 4:
+        mai_reasons.append(f"Large diff ({features.get('diff_size', 0)} lines) increases review burden")
+
+    intg_reasons = []
+    if features.get("api_breaking_signal", 0) > 0:
+        intg_reasons.append("Public API removed or modified — potential breaking change")
+    if features.get("dependency_changes", 0) > 3:
+        intg_reasons.append(f"High dependency churn ({features['dependency_changes']} import changes)")
+    if features.get("files_touched", 1) > 5:
+        intg_reasons.append(f"Wide-ranging change across {features['files_touched']} files")
+
+    return {
+        "correctness":              max(0.0, round(cor,  3)),
+        "correctness_reasons":      cor_reasons,
+        "security":                 max(0.0, round(sec,  3)),
+        "security_reasons":         sec_reasons,
+        "maintainability":          max(0.0, round(mai,  3)),
+        "maintainability_reasons":  mai_reasons,
+        "integration":              max(0.0, round(intg, 3)),
+        "integration_reasons":      intg_reasons,
+    }

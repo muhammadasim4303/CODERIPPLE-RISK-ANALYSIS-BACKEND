@@ -1,0 +1,617 @@
+"""
+CodeRipple Flask Backend
+Provides REST API endpoints for risk analysis of GitHub commits.
+"""
+
+import os
+import logging
+from datetime import datetime, timezone
+from functools import wraps
+
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+
+from feature_extractor import extract_features, features_to_vector, ALL_FEATURE_COLS
+from risk_reasoning import generate_risk_reasons, derive_risk_categories
+
+# ── Try loading model; gracefully fall back to heuristic mode ─────────────
+try:
+    from model_inference import predict as model_predict, is_model_available
+    MODEL_AVAILABLE = is_model_available()
+except Exception as e:
+    MODEL_AVAILABLE = False
+    logging.warning(f"Model loading failed: {e} — running in heuristic mode")
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+
+# ─────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────
+
+def error_response(message: str, status: int = 400):
+    return jsonify({"error": message}), status
+
+
+def heuristic_predict(features: dict) -> dict:
+    """
+    Rule-based fallback when best_model.pt is not loaded yet.
+    Uses the same features that matter most during training.
+    """
+    score = 0.0
+
+    # Diff size signals (log-scaled to avoid giant PRs dominating)
+    score += min(features.get("log_diff_size",    0) * 0.08, 0.20)
+    score += min(features.get("log_added_lines",  0) * 0.05, 0.12)
+
+    # Security — high weight
+    score += min(features.get("security_pattern_hits", 0) * 0.08, 0.20)
+    score += features.get("critical_files_count",  0) * 0.10
+
+    # Complexity
+    cyc_delta = features.get("cyclomatic_complexity_delta", 0)
+    score += min(max(0, cyc_delta) * 0.04, 0.15)
+    score += min(features.get("structural_risk", 0) * 0.008, 0.12)
+
+    # Test coverage
+    score += features.get("no_test_coverage", 0) * 0.15
+
+    # API changes
+    score += min(features.get("api_breaking_signal", 0) * 0.08, 0.15)
+
+    # Code dissimilarity — large rewrites are riskier
+    score += features.get("code_dissimilarity", 0) * 0.12
+
+    # Dependencies
+    score += features.get("has_new_deps", 0) * 0.06
+    score += min(features.get("dependency_changes", 0) * 0.02, 0.08)
+
+    # Reduce for test-only changes
+    score -= features.get("is_test_only", 0) * 0.25
+
+    score = float(max(0.0, min(1.0, score)))
+
+    if score >= 0.55:
+        label = "HIGH RISK"
+    elif score >= 0.28:
+        label = "MEDIUM RISK"
+    else:
+        label = "LOW RISK"
+
+    conf = 0.72 if score > 0.55 else (0.68 if score > 0.28 else 0.78)
+    high   = score if label == "HIGH RISK"   else max(0.0, score * 0.6)
+    medium = score if label == "MEDIUM RISK" else max(0.0, 0.35 - abs(score - 0.4))
+    low    = max(0.0, 1.0 - high - medium)
+    return {
+        "pred_risk_score": score,
+        "pred_risk_label": label,
+        "pred_confidence": conf,
+        "probabilities": {
+            "HIGH RISK":   round(high,   3),
+            "MEDIUM RISK": round(medium, 3),
+            "LOW RISK":    round(low,    3),
+        },
+        "mode": "heuristic",
+    }
+
+
+def _is_trivial_commit(features: dict) -> tuple[bool, str]:
+    """
+    Returns (is_trivial, reason) if this commit should be forced to LOW RISK
+    regardless of what the model predicts.
+
+    Rules:
+      1. No code files at all (only docs/config/assets)
+      2. Only test files changed
+      3. Tiny change with zero risk signals
+    """
+    CODE_EXTENSIONS = {
+        '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.cs', '.cpp', '.c',
+        '.go', '.rb', '.php', '.swift', '.kt', '.rs', '.scala', '.sh',
+        '.sql', '.html', '.css', '.vue', '.r', '.m', '.h', '.hpp',
+    }
+    NON_CODE_EXTENSIONS = {
+        '.md', '.txt', '.rst', '.pdf', '.png', '.jpg', '.jpeg', '.gif',
+        '.svg', '.ico', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+        '.env', '.gitignore', '.lock', '.csv', '.xml', '.bat', '.ps1',
+    }
+
+    prod_files   = int(features.get("prod_files_count",        0))
+    test_files   = int(features.get("test_files_count",        0))
+    critical     = int(features.get("critical_files_count",    0))
+    security     = int(features.get("security_pattern_hits",   0))
+    api_breaking = int(features.get("api_breaking_signal",     0))
+    exceptions   = int(features.get("exception_changes",       0))
+    diff_size    = int(features.get("diff_size",                0))
+    added        = int(features.get("added_lines",              0))
+    removed      = int(features.get("removed_lines",            0))
+    cyc_delta    = float(features.get("cyclomatic_complexity_delta", 0))
+    imports_added = int(features.get("import_added",            0))
+    struct_changes = int(features.get("structure_changes",      0))
+    is_test_only = int(features.get("is_test_only",             0))
+
+    # Rule 1: Test-only changes
+    if is_test_only and not critical and not security:
+        return True, "Only test files modified — no production code changed"
+
+    # Rule 2: No production code files involved
+    if prod_files == 0 and test_files == 0:
+        return True, "No code files involved — documentation or config change only"
+
+    # Rule 3: Tiny trivial change — small diff, no signals at all
+    trivial_change = (
+        diff_size <= 30 and
+        added <= 20 and
+        removed <= 10 and
+        security == 0 and
+        critical == 0 and
+        api_breaking == 0 and
+        exceptions == 0 and
+        imports_added == 0 and
+        struct_changes == 0 and
+        abs(cyc_delta) < 2
+    )
+    if trivial_change:
+        return True, "Very small change with no risk signals detected"
+
+    return False, ""
+
+
+def _has_critical_signals(features: dict) -> bool:
+    """Returns True if the commit has signals that justify HIGH/MEDIUM risk."""
+    return (
+        features.get("security_pattern_hits",  0) >= 3  or
+        features.get("critical_files_count",   0) >= 1  or
+        features.get("api_breaking_signal",    0) >= 2  or
+        features.get("exception_removed",      0) >= 2  or
+        features.get("cyclomatic_complexity_delta", 0) >= 5 or
+        features.get("removed_lines",          0) >= 50 or
+        features.get("dependency_changes",     0) >= 3  or
+        features.get("structural_risk",        0) >= 10
+    )
+
+
+def run_prediction(features: dict) -> dict:
+    # ── Gate 1: Force LOW RISK for trivially safe commits ─────────────────
+    trivial, trivial_reason = _is_trivial_commit(features)
+    if trivial:
+        return {
+            "pred_risk_score": 0.10,
+            "pred_risk_label": "LOW RISK",
+            "pred_confidence": 0.92,
+            "probabilities": {"HIGH RISK": 0.03, "MEDIUM RISK": 0.07, "LOW RISK": 0.90},
+            "mode": "rule:trivial",
+            "override_reason": trivial_reason,
+        }
+
+    heuristic = heuristic_predict(features)
+
+    if not MODEL_AVAILABLE:
+        return heuristic
+
+    try:
+        vec = features_to_vector(features)
+        model_result = model_predict(vec)
+        model_result["mode"] = "model"
+    except Exception as e:
+        logger.warning(f"Model inference failed ({e}) — using heuristic")
+        return heuristic
+
+    m_label = model_result["pred_risk_label"]
+    h_score = heuristic["pred_risk_score"]
+
+    # ── Gate 2: Model says HIGH/MEDIUM but there are no real signals ───────
+    # Don't trust the model when it over-fires on harmless commits
+    has_signals = _has_critical_signals(features)
+    if not has_signals and m_label in ("HIGH RISK", "MEDIUM RISK"):
+        # Downgrade to LOW unless heuristic also agrees it's risky
+        if h_score < 0.35:
+            model_result["pred_risk_label"] = "LOW RISK"
+            model_result["pred_risk_score"] = min(model_result["pred_risk_score"], 0.25)
+            model_result["mode"] = "model+rule:downgrade"
+
+    # ── Gate 3: Danger signals the model under-scores ──────────────────────
+    danger = (
+        features.get("security_pattern_hits", 0) >= 8 or
+        (features.get("critical_files_count", 0) > 0 and
+         features.get("no_test_coverage",     0) == 1 and
+         features.get("security_pattern_hits",0) >= 3)
+    )
+    if danger and m_label == "LOW RISK":
+        blended = max((h_score + model_result["pred_risk_score"]) / 2, 0.60)
+        model_result["pred_risk_score"] = blended
+        model_result["pred_risk_label"] = "HIGH RISK" if blended >= 0.55 else "MEDIUM RISK"
+        model_result["pred_confidence"] = 0.70
+        model_result["mode"] = "model+rule:upgrade"
+
+    return model_result
+
+
+# ─────────────────────────────────────────────
+# Routes
+# ─────────────────────────────────────────────
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "ok",
+        "model_loaded": MODEL_AVAILABLE,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.route("/api/analyze", methods=["POST"])
+def analyze_commit():
+    """
+    Main endpoint: accepts raw commit data from GitHub API and returns risk prediction.
+
+    Expected JSON body:
+    {
+        "repo":          "owner/repo",
+        "sha":           "abc123...",
+        "description":   "commit message",
+        "patch":         "unified diff string",
+        "file":          "path/to/file.py",
+        "old_contents":  "...",
+        "new_contents":  "...",
+        "messages":      "...",          (optional)
+        "description_lang": "en",       (optional)
+        "file_rows":     123             (optional)
+    }
+
+    Returns:
+    {
+        "sha": "...",
+        "risk_score": 0.72,
+        "risk_label": "HIGH RISK",
+        "confidence": 0.84,
+        "probabilities": { "HIGH RISK": ..., "LOW RISK": ..., "MEDIUM RISK": ... },
+        "risk_categories": { "correctness": ..., "security": ..., ... },
+        "risk_reasons": ["..."],
+        "features": { ... },    // computed features (for debugging/display)
+        "analyzed_at": "2025-..."
+    }
+    """
+    body = request.get_json(silent=True)
+    if not body:
+        return error_response("Request body must be JSON")
+
+    required = ["sha", "patch"]
+    missing  = [k for k in required if not body.get(k)]
+    if missing:
+        return error_response(f"Missing required fields: {', '.join(missing)}")
+
+    try:
+        features    = extract_features(body)
+        prediction  = run_prediction(features)
+        reasons     = generate_risk_reasons(
+            features,
+            prediction["pred_risk_label"],
+            prediction["pred_risk_score"]
+        )
+        categories  = derive_risk_categories(features)
+
+        # Remove internal meta before returning
+        display_features = {k: v for k, v in features.items() if k != "_meta"}
+
+        return jsonify({
+            "sha":             body["sha"],
+            "repo":            body.get("repo", ""),
+            "risk_score":      prediction["pred_risk_score"],
+            "risk_label":      prediction["pred_risk_label"],
+            "confidence":      prediction["pred_confidence"],
+            "probabilities":   prediction["probabilities"],
+            "risk_categories": categories,
+            "risk_reasons":    reasons,
+            "features":        display_features,
+            "mode":            prediction.get("mode", "model"),
+            "analyzed_at":     datetime.now(timezone.utc).isoformat(),
+        })
+
+    except Exception as e:
+        logger.exception("Analysis failed")
+        return error_response(f"Analysis failed: {str(e)}", 500)
+
+
+@app.route("/api/analyze/batch", methods=["POST"])
+def analyze_batch():
+    """
+    Analyze multiple commit files from a single commit.
+    Accepts a list of commit file objects and returns aggregated risk.
+
+    Body: {
+        "sha": "...",
+        "repo": "...",
+        "description": "...",
+        "files": [
+            { "patch": "...", "file": "...", "old_contents": "...", "new_contents": "..." },
+            ...
+        ]
+    }
+    """
+    body = request.get_json(silent=True)
+    if not body:
+        return error_response("Request body must be JSON")
+
+    sha        = body.get("sha", "")
+    repo       = body.get("repo", "")
+    description= body.get("description", "")
+    files      = body.get("files", [])
+
+    if not files:
+        return error_response("'files' list is required")
+
+    results = []
+    for file_data in files:
+        row = {
+            "sha":         sha,
+            "repo":        repo,
+            "description": description,
+            "patch":       file_data.get("patch", ""),
+            "file":        file_data.get("file", file_data.get("filename", "")),
+            "old_contents":file_data.get("old_contents", file_data.get("old_content", "")),
+            "new_contents":file_data.get("new_contents", file_data.get("new_content", "")),
+        }
+        try:
+            features = extract_features(row)
+            pred     = run_prediction(features)
+            results.append({
+                "file":       row["file"],
+                "risk_score": pred["pred_risk_score"],
+                "risk_label": pred["pred_risk_label"],
+            })
+        except Exception as e:
+            results.append({"file": row["file"], "error": str(e)})
+
+    # Aggregate
+    scores = [r["risk_score"] for r in results if "risk_score" in r]
+    agg_score = max(scores) if scores else 0.0  # use worst-case file
+    if agg_score >= 0.65:
+        agg_label = "HIGH RISK"
+    elif agg_score >= 0.35:
+        agg_label = "MEDIUM RISK"
+    else:
+        agg_label = "LOW RISK"
+
+    # Build combined features for reasons
+    combined_patch = "\n".join(f.get("patch", "") for f in files)
+    combined_data  = {
+        "sha":         sha, "repo": repo, "description": description,
+        "patch":       combined_patch,
+        "old_contents":"",
+        "new_contents":"",
+    }
+    combined_features = extract_features(combined_data)
+    reasons           = generate_risk_reasons(combined_features, agg_label, agg_score)
+    categories        = derive_risk_categories(combined_features)
+
+    return jsonify({
+        "sha":             sha,
+        "repo":            repo,
+        "risk_score":      agg_score,
+        "risk_label":      agg_label,
+        "risk_categories": categories,
+        "risk_reasons":    reasons,
+        "per_file":        results,
+        "analyzed_at":     datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.route("/api/commit/<sha>/risk", methods=["GET"])
+def get_cached_risk(sha: str):
+    """
+    Returns cached risk result if available (simple in-memory cache).
+    The frontend calls this to check if a commit was already analyzed.
+    """
+    cached = _risk_cache.get(sha)
+    if cached:
+        return jsonify(cached)
+    return error_response("Not analyzed yet", 404)
+
+
+@app.route("/api/commit/<sha>/risk", methods=["POST"])
+def store_risk(sha: str):
+    """Cache a risk result from the frontend (after analyze call)."""
+    body = request.get_json(silent=True) or {}
+    _risk_cache[sha] = {**body, "sha": sha}
+    return jsonify({"status": "cached"})
+
+
+# ─────────────────────────────────────────────
+# Simple in-memory cache (replace with Redis/DB in production)
+# ─────────────────────────────────────────────
+_risk_cache: dict = {}
+
+
+# ─────────────────────────────────────────────
+# Debug / Inspection Routes
+# ─────────────────────────────────────────────
+
+def _build_inspect_response(sha, owner, repo, gh_files, description):
+    """Shared helper — computes features and builds the full inspection JSON."""
+    combined_patch = "\n".join(f.get("patch", "") for f in gh_files if f.get("patch"))
+    file_names     = [f.get("filename", f.get("file", "")) for f in gh_files]
+
+    raw_data = {
+        "sha":          sha,
+        "repo":         f"{owner}/{repo}",
+        "description":  description,
+        "patch":        combined_patch,
+        "file":         file_names[0] if file_names else "",
+        "old_contents": "",
+        "new_contents": "",
+        "messages":     description,
+        "description_lang": "en",
+        "file_rows":    len(gh_files),
+        "agent":        "github",
+        "event_id":     sha,
+    }
+
+    features   = extract_features(raw_data)
+    meta       = features.pop("_meta", {})
+    prediction = run_prediction(features)
+    reasons    = generate_risk_reasons(features, prediction["pred_risk_label"], prediction["pred_risk_score"])
+    categories = derive_risk_categories(features)
+
+    label = prediction["pred_risk_label"]
+    score = prediction["pred_risk_score"]
+
+    return jsonify({
+        "event_id":           sha,
+        "agent":              "github",
+        "repo":               f"{owner}/{repo}",
+        "sha":                sha,
+        "description":        description,
+        "patch":              combined_patch,
+        "file_rows":          len(gh_files),
+        "file":               ", ".join(file_names),
+        "old_contents":       "",
+        "new_contents":       "",
+        "messages":           description,
+        "description_lang":   "en",
+        "is_test_only":                 features.get("is_test_only"),
+        "test_files_count":             features.get("test_files_count"),
+        "prod_files_count":             features.get("prod_files_count"),
+        "critical_files_count":         features.get("critical_files_count"),
+        "critical_file_names":          meta.get("critical_file_names", []),
+        "added_lines":                  features.get("added_lines"),
+        "removed_lines":                features.get("removed_lines"),
+        "diff_size":                    features.get("diff_size"),
+        "files_touched":                features.get("files_touched"),
+        "complexity_hits":              features.get("complexity_hits"),
+        "test_files_modified":          features.get("test_files_modified"),
+        "comment_before":               features.get("comment_before"),
+        "comment_after":                features.get("comment_after"),
+        "comment_delta":                features.get("comment_delta"),
+        "import_added":                 features.get("import_added"),
+        "import_removed":               features.get("import_removed"),
+        "dependency_changes":           features.get("dependency_changes"),
+        "exception_added":              features.get("exception_added"),
+        "exception_removed":            features.get("exception_removed"),
+        "exception_changes":            features.get("exception_changes"),
+        "public_api_added":             features.get("public_api_added"),
+        "public_api_removed":           features.get("public_api_removed"),
+        "public_api_modified":          features.get("public_api_modified"),
+        "security_pattern_hits":        features.get("security_pattern_hits"),
+        "structure_changes":            features.get("structure_changes"),
+        "branches_added":               features.get("branches_added"),
+        "branches_removed":             features.get("branches_removed"),
+        "cyclomatic_delta":             features.get("cyclomatic_delta"),
+        "max_indent_added":             features.get("max_indent_added"),
+        "max_indent_removed":           features.get("max_indent_removed"),
+        "depth_change":                 features.get("depth_change"),
+        "old_cyclomatic_complexity":    features.get("old_cyclomatic_complexity"),
+        "new_cyclomatic_complexity":    features.get("new_cyclomatic_complexity"),
+        "cyclomatic_complexity_delta":  features.get("cyclomatic_complexity_delta"),
+        "old_time_complexity":          features.get("old_time_complexity"),
+        "new_time_complexity":          features.get("new_time_complexity"),
+        "time_complexity_delta":        features.get("time_complexity_delta"),
+        "code_similarity":              features.get("code_similarity"),
+        "correctness_risk":             categories.get("correctness"),
+        "correctness_reasons":          categories.get("correctness_reasons", []),
+        "security_risk":                categories.get("security"),
+        "security_reasons":             categories.get("security_reasons", []),
+        "maintainability_risk":         categories.get("maintainability"),
+        "maintainability_reasons":      categories.get("maintainability_reasons", []),
+        "integration_risk":             categories.get("integration"),
+        "integration_reasons":          categories.get("integration_reasons", []),
+        "overall_risk_score":           round(score, 4),
+        "risk_label":                   label,
+        "risk_status":                  label,
+        "risk_reasons":                 reasons,
+        "_debug": {
+            "mode":            prediction.get("mode", "model"),
+            "confidence":      round(prediction.get("pred_confidence", 0), 4),
+            "probabilities":   prediction.get("probabilities", {}),
+            "files_in_commit": file_names,
+            "model_loaded":    MODEL_AVAILABLE,
+        }
+    })
+
+
+@app.route("/api/inspect/<owner>/<repo>/<sha>", methods=["POST"])
+def inspect_commit_post(owner: str, repo: str, sha: str):
+    """
+    POST version — frontend sends the commit data directly.
+    No outbound network calls needed from the backend.
+
+    Body: {
+        "description": "commit message",
+        "files": [
+            { "filename": "path/to/file.py", "patch": "diff --git ..." },
+            ...
+        ]
+    }
+    """
+    body = request.get_json(silent=True) or {}
+    gh_files    = body.get("files", [])
+    description = body.get("description", "")
+
+    if not gh_files:
+        return error_response("'files' list is required")
+
+    try:
+        return _build_inspect_response(sha, owner, repo, gh_files, description)
+    except Exception as e:
+        logger.exception("Inspect failed")
+        return error_response(f"Inspect failed: {str(e)}", 500)
+
+
+@app.route("/api/inspect/<owner>/<repo>/<sha>", methods=["GET"])
+def inspect_commit(owner: str, repo: str, sha: str):
+    """
+    GET version — backend fetches from GitHub directly.
+    Only works when the backend has internet access.
+    Pass ?token=ghp_xxx if the repo is private.
+    """
+    import urllib.request
+    import json as _json
+
+    gh_token = (
+        request.args.get("token") or
+        request.headers.get("X-Github-Token") or
+        os.environ.get("GITHUB_TOKEN", "")
+    )
+    headers = {"Accept": "application/vnd.github+json"}
+    if gh_token:
+        headers["Authorization"] = f"Bearer {gh_token}"
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            commit = _json.loads(resp.read())
+    except Exception as e:
+        return error_response(
+            f"Backend cannot reach GitHub ({e}). "
+            f"Use the POST version instead: POST /api/inspect/{owner}/{repo}/{sha} "
+            f"with {{files: [...], description: '...'}}", 502
+        )
+
+    if "message" in commit and "Not Found" in commit.get("message", ""):
+        return error_response(f"Commit {sha} not found", 404)
+
+    gh_files    = commit.get("files", [])
+    description = commit.get("commit", {}).get("message", "")
+
+    try:
+        return _build_inspect_response(sha, owner, repo, gh_files, description)
+    except Exception as e:
+        logger.exception("Inspect failed")
+        return error_response(f"Inspect failed: {str(e)}", 500)
+
+
+# ─────────────────────────────────────────────
+# Main
+
+# ─────────────────────────────────────────────
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Starting CodeRipple backend on port {port}")
+    logger.info(f"Model available: {MODEL_AVAILABLE}")
+    app.run(host="0.0.0.0", port=port, debug=False)
