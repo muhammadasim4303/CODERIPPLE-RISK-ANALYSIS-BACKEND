@@ -6,9 +6,9 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import { AppProvider } from "@/context/AppContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import AuthCallback from "./pages/Auth/AuthCallback";
 
 import Login from "./pages/Auth/Login";
-import AuthCallback from "./pages/Auth/AuthCallback";
 import Dashboard from "./pages/Dashboard/Dashboard";
 import RepoList from "./pages/Repositories/RepoList";
 import RepoDetails from "./pages/Repositories/RepoDetails";
@@ -35,7 +35,9 @@ const App = () => (
                 <Route path="/auth/callback" element={<AuthCallback />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/repos" element={<RepoList />} />
-                <Route path="/repos/:owner/:repo" element={<RepoDetails />} />
+                {/* repoId is encoded "owner/repo" */}
+                <Route path="/repos/:repoId" element={<RepoDetails />} />
+                {/* sha with optional owner/repo query params */}
                 <Route path="/commits/:sha" element={<CommitDetails />} />
                 <Route path="/change-impact" element={<ChangeImpact />} />
                 <Route path="/risk-overview" element={<RiskOverview />} />

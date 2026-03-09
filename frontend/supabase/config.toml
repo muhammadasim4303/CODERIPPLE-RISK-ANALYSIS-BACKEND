@@ -1,1 +1,9 @@
-project_id = "dzeawlpwaddazpqwwspq"
+project_id = "rgqjtnrkrvwruznvxgay"
+[functions.github-api]
+verify_jwt = false
+
+[functions.github-auth]
+verify_jwt = false
+
+[functions.github-config]
+verify_jwt = false

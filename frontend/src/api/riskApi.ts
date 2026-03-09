@@ -1,102 +1,88 @@
 import axiosInstance from './axiosInstance';
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
-export interface RiskCategories {
-  correctness:     number;
-  security:        number;
-  maintainability: number;
-  integration:     number;
+export interface RiskScore {
+  correctness_risk: number;
+  security_risk: number;
+  maintainability_risk: number;
+  integration_risk: number;
+  overall_risk_score: number;
+  risk_label: string;
+  risk_reasons: string[];
+  analyzed_at: string;
 }
 
-export interface RiskProbabilities {
-  'HIGH RISK':   number;
-  'LOW RISK':    number;
-  'MEDIUM RISK': number;
+export interface ChangeImpact {
+  source_file: string;
+  impacted_files: Array<{
+    file_path: string;
+    impact_type: 'direct' | 'indirect';
+    impact_score: number;
+    relationship: string;
+  }>;
+  dependency_graph: {
+    nodes: Array<{
+      id: string;
+      label: string;
+      type: 'source' | 'impacted' | 'unaffected';
+      risk_score?: number;
+    }>;
+    edges: Array<{
+      source: string;
+      target: string;
+      relationship: string;
+    }>;
+  };
 }
 
-export interface CommitRiskResult {
-  sha:             string;
-  repo:            string;
-  risk_score:      number;
-  risk_label:      'LOW RISK' | 'MEDIUM RISK' | 'HIGH RISK';
-  confidence:      number;
-  probabilities:   RiskProbabilities;
-  risk_categories: RiskCategories;
-  risk_reasons:    string[];
-  features:        Record<string, number>;
-  mode:            'model' | 'heuristic';
-  analyzed_at:     string;
-}
-
-export interface AnalyzeCommitPayload {
-  sha:           string;
-  repo:          string;
-  description:   string;
-  patch:         string;
-  file:          string;
-  old_contents:  string;
-  new_contents:  string;
-  messages?:     string;
-  description_lang?: string;
-  file_rows?:    number;
-}
-
-export interface BatchAnalyzePayload {
-  sha:         string;
-  repo:        string;
-  description: string;
-  files: Array<{
-    patch:         string;
-    file:          string;
-    old_contents?: string;
-    new_contents?: string;
+export interface DashboardSummary {
+  total_repositories: number;
+  total_commits_analyzed: number;
+  high_risk_commits: number;
+  average_risk_score: number;
+  risk_distribution: {
+    low: number;
+    medium: number;
+    high: number;
+    critical: number;
+  };
+  risk_trend: Array<{
+    date: string;
+    average_risk: number;
+    commit_count: number;
+  }>;
+  top_risky_repos: Array<{
+    repo_name: string;
+    average_risk: number;
+    high_risk_count: number;
   }>;
 }
-
-export interface BatchRiskResult extends CommitRiskResult {
-  per_file: Array<{
-    file:        string;
-    risk_score?: number;
-    risk_label?: string;
-    error?:      string;
-  }>;
-}
-
-export interface BackendHealth {
-  status:       string;
-  model_loaded: boolean;
-  timestamp:    string;
-}
-
-// ── API ────────────────────────────────────────────────────────────────────
 
 export const riskApi = {
-  health: async (): Promise<BackendHealth> => {
-    const res = await axiosInstance.get<BackendHealth>('/health');
-    return res.data;
+  // Get risk scores for a commit
+  getCommitRisk: async (sha: string): Promise<RiskScore> => {
+    const response = await axiosInstance.get<RiskScore>(`/commit/${sha}/risk`);
+    return response.data;
   },
 
-  analyzeCommit: async (payload: AnalyzeCommitPayload): Promise<CommitRiskResult> => {
-    const res = await axiosInstance.post<CommitRiskResult>('/analyze', payload);
-    return res.data;
+  // Get change impact analysis
+  getChangeImpact: async (sha: string): Promise<ChangeImpact> => {
+    const response = await axiosInstance.get<ChangeImpact>(`/impact/${sha}`);
+    return response.data;
   },
 
-  analyzeBatch: async (payload: BatchAnalyzePayload): Promise<BatchRiskResult> => {
-    const res = await axiosInstance.post<BatchRiskResult>('/analyze/batch', payload);
-    return res.data;
+  // Get dashboard summary
+  getDashboardSummary: async (): Promise<DashboardSummary> => {
+    const response = await axiosInstance.get<DashboardSummary>('/dashboard/summary');
+    return response.data;
   },
 
-  getCachedRisk: async (sha: string): Promise<CommitRiskResult | null> => {
-    try {
-      const res = await axiosInstance.get<CommitRiskResult>(`/commit/${sha}/risk`);
-      return res.data;
-    } catch {
-      return null;
-    }
-  },
-
-  cacheRisk: async (sha: string, result: CommitRiskResult): Promise<void> => {
-    await axiosInstance.post(`/commit/${sha}/risk`, result);
+  // Get organization-wide risk overview
+  getRiskOverview: async (): Promise<{
+    by_repo: Array<{ repo: string; risk: number }>;
+    by_file_type: Array<{ extension: string; risk: number; count: number }>;
+    trends: Array<{ week: string; risk: number }>;
+  }> => {
+    const response = await axiosInstance.get('/risk/overview');
+    return response.data;
   },
 };

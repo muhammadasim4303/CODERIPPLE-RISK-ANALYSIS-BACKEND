@@ -1,176 +1,138 @@
-import { useState, useEffect } from 'react';
-import type { Commit, CommitDetails } from '@/api/commitApi';
+/**
+ * useCommits — GitHub commits with branch switching, risk loading and analysis.
+ * Risk scores persisted in Firebase; loaded from cache first.
+ */
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import {
+  listCommits, listBranches, getCommit,
+  type GHCommit, type GHBranch,
+} from '@/lib/githubService';
+import { analyzeCommit, getCachedRisk, type RiskResult } from '@/lib/flaskService';
+import {
+  upsertRiskScore, getRiskScore, updateRepoStats,
+  type FBRiskScore,
+} from '@/lib/firebaseService';
 
-// Mock commits data
-const MOCK_COMMITS: Commit[] = [
-  {
-    sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
-    message: 'feat: Add user authentication flow with OAuth2 support',
-    author: { name: 'Sarah Chen', email: 'sarah@example.com', avatar_url: 'https://i.pravatar.cc/150?u=sarah' },
-    committed_at: '2024-02-15T10:30:00Z',
-    overall_risk_score: 0.72,
-    risk_label: 'HIGH',
-    files_changed: 8,
-    additions: 245,
-    deletions: 34,
-    analyzed: true,
-  },
-  {
-    sha: 'b2c3d4e5f67890123456789012345678901bcde',
-    message: 'fix: Resolve memory leak in data processing module',
-    author: { name: 'Alex Kim', email: 'alex@example.com', avatar_url: 'https://i.pravatar.cc/150?u=alex' },
-    committed_at: '2024-02-15T09:15:00Z',
-    overall_risk_score: 0.45,
-    risk_label: 'MEDIUM',
-    files_changed: 3,
-    additions: 67,
-    deletions: 89,
-    analyzed: true,
-  },
-  {
-    sha: 'c3d4e5f678901234567890123456789012cdef',
-    message: 'refactor: Simplify API response handlers',
-    author: { name: 'Jordan Lee', email: 'jordan@example.com', avatar_url: 'https://i.pravatar.cc/150?u=jordan' },
-    committed_at: '2024-02-14T16:45:00Z',
-    overall_risk_score: 0.28,
-    risk_label: 'LOW',
-    files_changed: 5,
-    additions: 112,
-    deletions: 156,
-    analyzed: true,
-  },
-  {
-    sha: 'd4e5f6789012345678901234567890123defg',
-    message: 'feat: Implement real-time notification system',
-    author: { name: 'Morgan Taylor', email: 'morgan@example.com', avatar_url: 'https://i.pravatar.cc/150?u=morgan' },
-    committed_at: '2024-02-14T14:20:00Z',
-    overall_risk_score: 0.61,
-    risk_label: 'HIGH',
-    files_changed: 12,
-    additions: 534,
-    deletions: 23,
-    analyzed: true,
-  },
-  {
-    sha: 'e5f67890123456789012345678901234efgh',
-    message: 'docs: Update API documentation and examples',
-    author: { name: 'Casey Davis', email: 'casey@example.com', avatar_url: 'https://i.pravatar.cc/150?u=casey' },
-    committed_at: '2024-02-14T11:00:00Z',
-    overall_risk_score: 0.12,
-    risk_label: 'LOW',
-    files_changed: 4,
-    additions: 189,
-    deletions: 45,
-    analyzed: true,
-  },
-  {
-    sha: 'f6789012345678901234567890123456fghi',
-    message: 'security: Patch SQL injection vulnerability in search',
-    author: { name: 'Riley Johnson', email: 'riley@example.com', avatar_url: 'https://i.pravatar.cc/150?u=riley' },
-    committed_at: '2024-02-13T15:30:00Z',
-    overall_risk_score: 0.89,
-    risk_label: 'CRITICAL',
-    files_changed: 2,
-    additions: 34,
-    deletions: 12,
-    analyzed: true,
-  },
-];
+export interface CommitRow extends GHCommit {
+  risk?: RiskResult | null;
+  isAnalyzing?: boolean;
+}
 
-const MOCK_COMMIT_DETAILS: CommitDetails = {
-  sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
-  message: 'feat: Add user authentication flow with OAuth2 support',
-  author: { name: 'Sarah Chen', email: 'sarah@example.com', avatar_url: 'https://i.pravatar.cc/150?u=sarah' },
-  committed_at: '2024-02-15T10:30:00Z',
-  overall_risk_score: 0.72,
-  risk_label: 'HIGH',
-  files_changed: 8,
-  additions: 245,
-  deletions: 34,
-  analyzed: true,
-  risk_scores: {
-    correctness: 0.65,
-    security: 0.82,
-    maintainability: 0.45,
-    integration: 0.71,
-  },
-  risk_reasons: [
-    'Authentication logic modified without corresponding test updates',
-    'Sensitive token handling detected in new code paths',
-    'High cyclomatic complexity in auth validation function',
-    'Multiple external API integrations added',
-  ],
-  patch: `@@ -1,15 +1,45 @@
- import { useState, useCallback } from 'react';
-+import { OAuth2Client } from './oauth';
-+import { TokenManager } from './tokens';
+export function useCommits(owner?: string, repo?: string) {
+  const { user } = useAuth();
+  const [commits, setCommits]           = useState<CommitRow[]>([]);
+  const [branches, setBranches]         = useState<GHBranch[]>([]);
+  const [currentBranch, setCurrentBranch] = useState('');
+  const [isLoading, setIsLoading]       = useState(false);
+  const [isBranchLoading, setIsBranchLoading] = useState(false);
+  const [error, setError]               = useState<string | null>(null);
 
- export function useAuth() {
--  const [user, setUser] = useState(null);
-+  const [user, setUser] = useState<User | null>(null);
-+  const [isLoading, setIsLoading] = useState(false);
-+  const oauth = new OAuth2Client();
-+
-+  const authenticate = useCallback(async (provider: string) => {
-+    setIsLoading(true);
-+    try {
-+      const token = await oauth.authorize(provider);
-+      const userData = await TokenManager.validate(token);
-+      setUser(userData);
-+    } catch (error) {
-+      console.error('Auth failed:', error);
-+      throw error;
-+    } finally {
-+      setIsLoading(false);
-+    }
-+  }, []);
-
-   return {
-     user,
--    login: () => {},
--    logout: () => {}
-+    isLoading,
-+    authenticate,
-+    logout: () => setUser(null)
-   };
- }`,
-  files: [
-    { filename: 'src/hooks/useAuth.ts', status: 'modified', additions: 45, deletions: 12, patch: '...', risk_contribution: 0.35 },
-    { filename: 'src/lib/oauth.ts', status: 'added', additions: 120, deletions: 0, patch: '...', risk_contribution: 0.28 },
-    { filename: 'src/lib/tokens.ts', status: 'added', additions: 67, deletions: 0, patch: '...', risk_contribution: 0.22 },
-    { filename: 'src/types/auth.ts', status: 'added', additions: 13, deletions: 0, patch: '...', risk_contribution: 0.05 },
-  ],
-};
-
-export function useCommits(repoId?: string) {
-  const [commits, setCommits] = useState<Commit[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
+  // Load branches once
   useEffect(() => {
-    const fetchCommits = async () => {
-      try {
-        setIsLoading(true);
-        await new Promise(resolve => setTimeout(resolve, 300));
-        setCommits(MOCK_COMMITS);
-      } catch (err) {
-        setError(err instanceof Error ? err : new Error('Failed to fetch commits'));
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    if (!owner || !repo) return;
+    setIsBranchLoading(true);
+    listBranches(owner, repo)
+      .then(setBranches)
+      .catch(() => setBranches([]))
+      .finally(() => setIsBranchLoading(false));
+  }, [owner, repo]);
 
-    fetchCommits();
-  }, [repoId]);
+  const loadCommits = useCallback(async (branch?: string) => {
+    if (!owner || !repo) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const ghCommits = await listCommits(owner, repo, 1, branch || undefined);
 
-  const getCommitDetails = async (sha: string): Promise<CommitDetails | null> => {
-    await new Promise(resolve => setTimeout(resolve, 200));
-    if (sha === MOCK_COMMIT_DETAILS.sha) {
-      return MOCK_COMMIT_DETAILS;
+      // Hydrate with cached risk scores
+      const rows: CommitRow[] = await Promise.all(
+        ghCommits.map(async (c): Promise<CommitRow> => {
+          let risk: RiskResult | null = null;
+          if (user) {
+            const fb = await getRiskScore(user.id, c.sha);
+            if (fb) {
+              risk = {
+                sha: fb.sha,
+                risk_label: fb.risk_label,
+                overall_risk_score: fb.overall_risk_score,
+                correctness_risk: fb.correctness_risk,
+                security_risk: fb.security_risk,
+                maintainability_risk: fb.maintainability_risk,
+                integration_risk: fb.integration_risk,
+                risk_reasons: fb.risk_reasons,
+                mode: fb.mode,
+                added_lines: fb.additions,
+                removed_lines: fb.deletions,
+                files_touched: fb.files_changed,
+              };
+            } else {
+              risk = await getCachedRisk(c.sha);
+            }
+          }
+          return { ...c, risk };
+        })
+      );
+
+      setCommits(rows);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load commits');
+    } finally {
+      setIsLoading(false);
     }
-    // Return mock details with modified sha
-    return { ...MOCK_COMMIT_DETAILS, sha };
+  }, [owner, repo, user]);
+
+  useEffect(() => { loadCommits(currentBranch || undefined); }, [owner, repo, currentBranch]);
+
+  const switchBranch = (branch: string) => {
+    setCurrentBranch(branch);
+    setCommits([]);
   };
 
-  return { commits, isLoading, error, getCommitDetails };
+  const runAnalysis = useCallback(async (sha: string): Promise<RiskResult | null> => {
+    if (!owner || !repo || !user) return null;
+
+    setCommits(prev => prev.map(c => c.sha === sha ? { ...c, isAnalyzing: true } : c));
+    try {
+      const full = await getCommit(owner, repo, sha);
+      const result = await analyzeCommit(sha, full.commit.message, full.files ?? []);
+
+      // Persist to Firebase
+      const score: Omit<FBRiskScore, 'userId'> = {
+        sha,
+        repoFullName: `${owner}/${repo}`,
+        branch: currentBranch || 'default',
+        message: full.commit.message,
+        author_name: full.commit.author.name,
+        author_avatar: full.author?.avatar_url ?? '',
+        committed_at: full.commit.author.date,
+        risk_label: result.risk_label,
+        overall_risk_score: result.overall_risk_score,
+        correctness_risk: result.correctness_risk ?? 0,
+        security_risk: result.security_risk ?? 0,
+        maintainability_risk: result.maintainability_risk ?? 0,
+        integration_risk: result.integration_risk ?? 0,
+        risk_reasons: result.risk_reasons ?? [],
+        files_changed: result.files_touched ?? 0,
+        additions: result.added_lines ?? 0,
+        deletions: result.removed_lines ?? 0,
+        mode: result.mode ?? 'model',
+        analyzed_at: new Date().toISOString(),
+      };
+      await upsertRiskScore(user.id, score);
+
+      setCommits(prev => prev.map(c => c.sha === sha ? { ...c, risk: result, isAnalyzing: false } : c));
+      return result;
+    } catch (e) {
+      setCommits(prev => prev.map(c => c.sha === sha ? { ...c, isAnalyzing: false } : c));
+      throw e;
+    }
+  }, [owner, repo, user, currentBranch]);
+
+  return {
+    commits, branches, currentBranch,
+    isLoading, isBranchLoading, error,
+    switchBranch, runAnalysis,
+    refresh: () => loadCommits(currentBranch || undefined),
+  };
 }

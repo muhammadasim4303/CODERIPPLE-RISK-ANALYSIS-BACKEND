@@ -1,49 +1,33 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Zap, Loader2 } from 'lucide-react';
 
 export default function AuthCallback() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const code = searchParams.get('code');
-    if (!code) {
-      setError('No authorization code received');
-      return;
-    }
-
-    const exchangeCode = async () => {
-      try {
-        const { data, error: fnError } = await supabase.functions.invoke('github-auth', {
-          body: {
-            code,
-            redirect_uri: `${window.location.origin}/auth/callback`,
-          },
-        });
-
-        if (fnError) throw fnError;
-        if (data?.error) throw new Error(data.error);
-
-        // Use the magic link token to sign in
-        const { error: otpError } = await supabase.auth.verifyOtp({
-          token_hash: data.token_hash,
-          type: 'magiclink',
-        });
-
-        if (otpError) throw otpError;
-
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
         navigate('/dashboard', { replace: true });
-      } catch (err) {
-        console.error('Auth callback error:', err);
-        setError(err instanceof Error ? err.message : 'Authentication failed');
       }
-    };
+    });
 
-    exchangeCode();
-  }, [searchParams, navigate]);
+    // Also check if already signed in
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        navigate('/dashboard', { replace: true });
+      } else {
+        // Give it 3 seconds then show error
+        setTimeout(() => {
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            if (!session) setError('Authentication failed. Please try again.');
+          });
+        }, 3000);
+      }
+    });
+  }, [navigate]);
 
   if (error) {
     return (
