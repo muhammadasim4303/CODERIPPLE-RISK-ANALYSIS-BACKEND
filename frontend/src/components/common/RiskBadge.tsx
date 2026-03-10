@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils';
-import { getRiskLevel, getRiskBadgeClass } from '@/utils/riskUtils';
 import type { RiskLevel } from '@/utils/constants';
+import { getRiskLevel, getRiskBadgeClass, riskLabelToLevel } from '@/utils/riskUtils';
+
 
 interface RiskBadgeProps {
   score?: number;
@@ -17,7 +18,9 @@ const sizeClasses = {
 };
 
 export function RiskBadge({ score, level, showScore = false, size = 'md', className }: RiskBadgeProps) {
-  const riskLevel = level || (score !== undefined ? getRiskLevel(score) : 'LOW');
+  const riskLevel = level
+    ? (level.includes(' ') ? riskLabelToLevel(level) : level as RiskLevel)
+    : (score !== undefined ? getRiskLevel(score) : 'LOW');
   const badgeClass = getRiskBadgeClass(riskLevel);
 
   return (

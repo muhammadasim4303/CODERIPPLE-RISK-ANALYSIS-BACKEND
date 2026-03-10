@@ -60,6 +60,37 @@ def is_critical_file(filename: str) -> bool:
     return any(p in fname for p in critical_patterns)
 
 
+GENERATED_FILE_PATTERNS = [
+    'node_modules/',
+    '.vite/deps/',
+    'dist/',
+    'build/',
+    '.next/',
+    '__pycache__/',
+    '.cache/',
+    '.min.js',
+    '.min.css',
+    '.bundle.js',
+    '.chunk.js',
+    '.map',
+    'yarn.lock',
+    'package-lock.json',
+    'poetry.lock',
+    'Pipfile.lock',
+    'composer.lock',
+    '.pb.go',
+    '_pb2.py',
+    '.generated.',
+    'generated/',
+    'auto-generated',
+]
+
+def is_generated_file(filename: str) -> bool:
+    """Return True if the file is auto-generated, compiled, or a lock file."""
+    fname = filename.lower().replace('\\', '/')
+    return any(pattern in fname for pattern in GENERATED_FILE_PATTERNS)
+
+
 def detect_test_only_change(patch: str) -> bool:
     all_files = re.findall(r"diff --git a/(.*?) b/", patch)
     if not all_files:
@@ -154,6 +185,47 @@ def extract_features(data: dict) -> dict:
     old_code     = normalize_code(data.get("old_contents", ""))
     new_code     = normalize_code(data.get("new_contents", ""))
     filename     = data.get("file", "")
+
+    # ── Short-circuit: generated/compiled/lock files → zero all signals ───
+    if is_generated_file(filename):
+        import math as _math
+        added_lines   = len(re.findall(r'^\+(?!\+)', patch, flags=re.MULTILINE))
+        removed_lines = len(re.findall(r'^-(?!-)',   patch, flags=re.MULTILINE))
+        churn = added_lines + removed_lines
+        zero = {
+            "is_test_only": 0, "test_files_count": 0, "prod_files_count": 1,
+            "critical_files_count": 0, "added_lines": added_lines,
+            "removed_lines": removed_lines, "diff_size": churn,
+            "files_touched": 1, "complexity_hits": 0, "test_files_modified": 0,
+            "comment_before": 0, "comment_after": 0, "comment_delta": 0,
+            "import_added": 0, "import_removed": 0, "dependency_changes": 0,
+            "exception_added": 0, "exception_removed": 0, "exception_changes": 0,
+            "public_api_added": 0, "public_api_removed": 0, "public_api_modified": 0,
+            "security_pattern_hits": 0, "structure_changes": 0,
+            "branches_added": 0, "branches_removed": 0, "cyclomatic_delta": 0,
+            "max_indent_added": 0, "max_indent_removed": 0, "depth_change": 0,
+            "old_cyclomatic_complexity": 1, "new_cyclomatic_complexity": 1,
+            "cyclomatic_complexity_delta": 0, "old_time_complexity": 1,
+            "new_time_complexity": 1, "time_complexity_delta": 0,
+            "code_similarity": 1.0,
+            # engineered
+            "change_ratio": 1.0, "churn": churn, "net_lines": added_lines - removed_lines,
+            "cyclomatic_increase_pct": 0.0, "api_change_total": 0, "api_breaking_signal": 0,
+            "exception_net": 0, "import_net": 0, "has_new_deps": 0,
+            "test_coverage_ratio": 0.0, "no_test_coverage": 0, "code_dissimilarity": 0.0,
+            "structural_risk": 0,
+            "log_added_lines":   _math.log1p(added_lines),
+            "log_removed_lines": _math.log1p(removed_lines),
+            "log_diff_size":     _math.log1p(churn),
+            "log_churn":         _math.log1p(churn),
+        }
+        zero["_meta"] = {
+            "critical_file_names": [],
+            "is_test_only": False,
+            "all_files": [filename] if filename else [],
+            "is_generated": True,
+        }
+        return zero
 
     # ── If old/new contents are missing, reconstruct from patch ──────────
     if (not old_code.strip() or not new_code.strip()) and patch.strip():

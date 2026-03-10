@@ -62,3 +62,12 @@ export function getRiskDescription(level: RiskLevel): string {
   };
   return descriptions[level];
 }
+
+export function riskLabelToLevel(label: string): RiskLevel {
+  if (!label) return 'LOW';
+  const upper = label.toUpperCase();
+  if (upper.includes('CRITICAL')) return 'CRITICAL';
+  if (upper.includes('HIGH'))     return 'HIGH';
+  if (upper.includes('MEDIUM'))   return 'MEDIUM';
+  return 'LOW';
+}
