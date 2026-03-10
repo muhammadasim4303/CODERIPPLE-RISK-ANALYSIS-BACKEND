@@ -13,6 +13,12 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 
+function clean<T extends object>(obj: T): T {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined)
+  ) as T;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface FBRepo {
@@ -105,7 +111,7 @@ export async function updateRepoStats(
 export async function upsertRiskScore(userId: string, score: Omit<FBRiskScore, 'userId'>): Promise<void> {
   await setDoc(
     doc(db, 'users', userId, 'riskScores', score.sha),
-    { ...score, userId, analyzed_at: new Date().toISOString() },
+    clean({ ...score, userId, analyzed_at: new Date().toISOString() }),
     { merge: true }
   );
 }
