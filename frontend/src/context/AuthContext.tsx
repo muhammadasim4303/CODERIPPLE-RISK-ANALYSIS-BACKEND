@@ -55,7 +55,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Initial session check
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        setUser(sbUserToUser(session.user));
+        setUser(prev => {
+          const newUser = sbUserToUser(session.user);
+          if (prev && prev.id === newUser.id && 
+              prev.username === newUser.username && 
+              prev.email === newUser.email && 
+              prev.avatar_url === newUser.avatar_url) {
+            return prev;
+          }
+          return newUser;
+        });
         // Save token if available on initial load
         if (session.provider_token) {
           saveGitHubToken(session.user.id, session.provider_token);
@@ -66,7 +75,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ? sbUserToUser(session.user) : null);
+      setUser(prev => {
+        if (!session?.user) return null;
+        const newUser = sbUserToUser(session.user);
+        if (prev && prev.id === newUser.id && 
+            prev.username === newUser.username && 
+            prev.email === newUser.email && 
+            prev.avatar_url === newUser.avatar_url) {
+          return prev;
+        }
+        return newUser;
+      });
       setIsLoading(false);
 
       // Save fresh GitHub token on every login

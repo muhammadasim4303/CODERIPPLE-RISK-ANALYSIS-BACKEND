@@ -299,8 +299,9 @@ def extract_features(data: dict) -> dict:
                     '.yaml', '.yml', '.toml', '.ini', '.cfg', '.lock'}
     _is_markup = ('.' + filename.lower().rsplit('.', 1)[-1] if '.' in filename else '') in _markup_exts
     if not is_test_only and not _is_markup:
-        public_api_added   = len(re.findall(r'^\+.*\b(def|function|class|public|export)\b', patch, re.MULTILINE))
-        public_api_removed = len(re.findall(r'^-.*\b(def|function|class|public|export)\b',  patch, re.MULTILINE))
+        api_pattern = r'(?:.*\b(?:def|function|class|public|export)\b|.*\b\w+\s*=\s*lambda\b)'
+        public_api_added   = len(re.findall(r'^\+' + api_pattern, patch, re.MULTILINE))
+        public_api_removed = len(re.findall(r'^-' + api_pattern,  patch, re.MULTILINE))
     else:
         public_api_added = public_api_removed = 0
 
@@ -405,8 +406,8 @@ def extract_features(data: dict) -> dict:
     churn                   = added_lines + removed_lines
     net_lines               = added_lines - removed_lines
     cyclomatic_increase_pct = float(np.clip(cyc_delta / (old_cyclomatic + eps), -5, 5))
-    api_change_total        = public_api_added + public_api_removed + public_api_modified
-    api_breaking_signal     = public_api_removed + public_api_modified
+    api_change_total        = public_api_added + public_api_removed
+    api_breaking_signal     = max(0, public_api_removed - public_api_added)
     exception_net           = exception_added - exception_removed
     import_net              = import_added - import_removed
     has_new_deps            = int(import_added > 0)
@@ -417,8 +418,8 @@ def extract_features(data: dict) -> dict:
         structure_changes +
         branches_added +
         branches_removed +
-        abs(depth_change) * 2 +
-        abs(cyclomatic_delta)
+        max(0, depth_change) * 2 +
+        max(0, cyclomatic_delta)
     )
     log_added_lines   = math.log1p(added_lines)
     log_removed_lines = math.log1p(removed_lines)

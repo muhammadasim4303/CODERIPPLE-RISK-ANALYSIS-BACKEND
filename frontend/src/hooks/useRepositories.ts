@@ -9,6 +9,10 @@ import { upsertRepo, listRepos as fbListRepos, listRiskScoresByRepo, type FBRepo
 
 export type Repository = FBRepo & { html_url?: string; topics?: string[]; pushed_at?: string };
 
+// Module-level cache — survives navigation, cleared after 5 min
+const repoCache = new Map<string, { data: Repository[]; ts: number }>();
+const CACHE_TTL = 5 * 60 * 1000;
+
 function ghToFBBase(r: GHRepo): Omit<FBRepo, 'userId' | 'average_risk_score' | 'total_commits_analyzed' | 'high_risk_commits_count' | 'medium_risk_commits_count' | 'low_risk_commits_count' | 'last_analyzed_at'> {
   return {
     id: String(r.id),
@@ -32,8 +36,17 @@ export function useRepositories() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = useCallback(async () => {
+  const fetch = useCallback(async (force = false) => {
     if (!user) return;
+
+    // Return cached data if fresh
+    const cached = repoCache.get(user.id);
+    if (!force && cached && Date.now() - cached.ts < CACHE_TTL) {
+      setRepositories(cached.data);
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
@@ -47,7 +60,6 @@ export function useRepositories() {
       // 3. Upsert only non-risk fields to Firebase (preserves risk stats via merge:true)
       await Promise.all(ghRepos.map(r => upsertRepo(user.id, {
         ...ghToFBBase(r),
-        // Preserve existing risk stats, don't overwrite with zeros
         average_risk_score:        fbMap.get(r.full_name)?.average_risk_score        ?? 0,
         total_commits_analyzed:    fbMap.get(r.full_name)?.total_commits_analyzed    ?? 0,
         high_risk_commits_count:   fbMap.get(r.full_name)?.high_risk_commits_count   ?? 0,
@@ -59,10 +71,9 @@ export function useRepositories() {
       // 4. Compute live risk stats from riskScores collection for each repo
       const enriched = await Promise.all(ghRepos.map(async gh => {
         const fb = fbMap.get(gh.full_name);
-        
-        // Recompute stats from actual riskScores for accuracy
+
         const scores = await listRiskScoresByRepo(user.id, gh.full_name);
-        const total = scores.length;
+        const total  = scores.length;
         const high   = scores.filter(s => s.risk_label === 'HIGH RISK').length;
         const medium = scores.filter(s => s.risk_label === 'MEDIUM RISK').length;
         const low    = scores.filter(s => s.risk_label === 'LOW RISK').length;
@@ -71,7 +82,6 @@ export function useRepositories() {
           ? scores.sort((a, b) => b.analyzed_at.localeCompare(a.analyzed_at))[0].analyzed_at
           : null;
 
-        // Write computed stats back to Firebase
         if (total > 0) {
           await upsertRepo(user.id, {
             ...ghToFBBase(gh),
@@ -87,14 +97,12 @@ export function useRepositories() {
         return {
           ...(fb ?? { ...ghToFBBase(gh), average_risk_score: 0, total_commits_analyzed: 0, high_risk_commits_count: 0, medium_risk_commits_count: 0, low_risk_commits_count: 0, last_analyzed_at: null }),
           userId: user.id,
-          // Always use freshly computed stats
           average_risk_score:        total > 0 ? avg        : (fb?.average_risk_score        ?? 0),
           total_commits_analyzed:    total > 0 ? total      : (fb?.total_commits_analyzed    ?? 0),
           high_risk_commits_count:   total > 0 ? high       : (fb?.high_risk_commits_count   ?? 0),
           medium_risk_commits_count: total > 0 ? medium     : (fb?.medium_risk_commits_count ?? 0),
           low_risk_commits_count:    total > 0 ? low        : (fb?.low_risk_commits_count    ?? 0),
           last_analyzed_at:          total > 0 ? lastAnalyzed : (fb?.last_analyzed_at        ?? null),
-          // Live GitHub fields
           stars_count:       gh.stargazers_count,
           forks_count:       gh.forks_count,
           open_issues_count: gh.open_issues_count,
@@ -104,6 +112,7 @@ export function useRepositories() {
         } as Repository;
       }));
 
+      repoCache.set(user.id, { data: enriched, ts: Date.now() });
       setRepositories(enriched);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load repositories';
@@ -124,5 +133,10 @@ export function useRepositories() {
     [repositories]
   );
 
-  return { repositories, isLoading, error, getRepository, refetch: fetch };
+  // Expose invalidate so runAnalysis in useCommits can bust the cache
+  const invalidateCache = useCallback(() => {
+    if (user) repoCache.delete(user.id);
+  }, [user]);
+
+  return { repositories, isLoading, error, getRepository, refetch: () => fetch(true), invalidateCache };
 }

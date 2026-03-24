@@ -55,6 +55,8 @@ def generate_risk_reasons(features: dict, risk_label: str, risk_score: float) ->
         )
     elif cyc_delta > 2:
         reasons.append(f"Cyclomatic complexity increased by {cyc_delta}")
+    elif cyc_delta < -2:
+        reasons.append(f"Cyclomatic complexity reduced by {abs(cyc_delta)} — positive refactoring")
 
     time_delta = features.get("time_complexity_delta", 0)
     if time_delta > 1:
@@ -118,9 +120,13 @@ def generate_risk_reasons(features: dict, risk_label: str, risk_score: float) ->
         )
 
     depth_change = features.get("depth_change", 0)
-    if abs(depth_change) > 8:
+    if depth_change > 8:
         reasons.append(
-            f"Significant nesting depth change ({depth_change:+d} indentation levels)"
+            f"Significant nesting depth increased (+{depth_change} indentation levels)"
+        )
+    elif depth_change < -8:
+        reasons.append(
+            f"Nesting depth reduced ({depth_change} indentation levels) — simpler structure"
         )
 
     # ── Code similarity ──────────────────────────────────────────────────

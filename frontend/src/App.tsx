@@ -18,7 +18,18 @@ import RiskOverview from "./pages/RiskAnalysis/RiskOverview";
 import Settings from "./pages/Settings/Settings";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
+      refetchOnWindowFocus: false,
+      refetchOnMount: false,
+      retry: 1,
+    },
+  },
+});
+
 
 const App = () => (
   <QueryClientProvider client={queryClient}>

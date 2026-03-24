@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, GitCommit, Clock, FileCode, AlertCircle, Play, Loader2, ExternalLink } from 'lucide-react';
 import { MainLayout } from '@/components/layouts/MainLayout';
@@ -22,13 +22,48 @@ export default function CommitDetails() {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const owner    = searchParams.get('owner') ?? '';
-  const repoName = searchParams.get('repo')  ?? '';
+  const owner = searchParams.get('owner') ?? '';
+  const repoName = searchParams.get('repo') ?? '';
 
-  const [commit, setCommit]     = useState<GHCommit | null>(null);
-  const [risk, setRisk]         = useState<RiskResult | null>(null);
+  const [commit, setCommit] = useState<GHCommit | null>(null);
+  const [risk, setRisk] = useState<RiskResult | null>(null);
+  const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const activeRiskMetrics = useMemo(() => {
+    if (!risk) return null;
+    if (!selectedFilename) return risk;
+
+    const fileRisk = risk.per_file?.find(f => f.file === selectedFilename) || risk.per_file?.find(f => f.file.endsWith(selectedFilename));
+    if (!fileRisk) return risk;
+
+    const ext = '.' + (selectedFilename.split('.').pop()?.toLowerCase() || '');
+    const NON_CODE_EXTS = ['.md', '.txt', '.csv', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.lock', '.log', '.xml', '.html', '.htm', '.css', '.scss', '.sass', '.less', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.pdf', '.zip', '.tar', '.gz'];
+    const isEnv = selectedFilename.toLowerCase().includes('.env') || selectedFilename.toLowerCase().includes('secret') || selectedFilename.toLowerCase().includes('credentials');
+
+    const isGit = selectedFilename.toLowerCase().includes('.git');
+    const isNonCode = NON_CODE_EXTS.includes(ext) || isGit;
+    let finalReasons = fileRisk.risk_reasons ? [...fileRisk.risk_reasons] : [];
+    
+    if (isNonCode) {
+      finalReasons = ["Changed file is non code (documentation, asset, or config)"];
+    }
+    if (isEnv) {
+      finalReasons.unshift("⚠️ CRITICAL: Environmental file or credentials may have been pushed!");
+    }
+
+    return {
+      ...risk, // preserve overall score and sha
+      correctness_risk: fileRisk.correctness_risk ?? 0,
+      security_risk: fileRisk.security_risk ?? 0,
+      maintainability_risk: fileRisk.maintainability_risk ?? 0,
+      integration_risk: fileRisk.integration_risk ?? 0,
+      risk_reasons: finalReasons,
+      mode: 'file-level',
+      isNonCode: isNonCode,
+    };
+  }, [risk, selectedFilename]);
 
   useEffect(() => {
     if (!sha) return;
@@ -49,6 +84,7 @@ export default function CommitDetails() {
               risk_reasons: fb.risk_reasons,
               mode: fb.mode, added_lines: fb.additions,
               removed_lines: fb.deletions, files_touched: fb.files_changed,
+              per_file: fb.per_file ?? [],
             });
           }
         }
@@ -70,7 +106,7 @@ export default function CommitDetails() {
     if (!sha || !commit) return;
     setIsAnalyzing(true);
     try {
-      const result = await analyzeCommit(sha, commit.commit.message, commit.files ?? []);
+      const result = await analyzeCommit(sha, commit.commit.message, commit.files ?? [], true);
       setRisk(result);
       // Persist
       if (user && owner && repoName) {
@@ -92,6 +128,7 @@ export default function CommitDetails() {
           deletions: result.removed_lines ?? 0,
           mode: result.mode ?? 'model',
           analyzed_at: new Date().toISOString(),
+          per_file: result.per_file ?? [],
         };
         await upsertRiskScore(user.id, score);
       }
@@ -105,11 +142,11 @@ export default function CommitDetails() {
 
   if (isLoading) return <MainLayout><PageLoader /></MainLayout>;
 
-  const message      = commit?.commit.message ?? sha ?? '';
-  const authorName   = commit?.commit.author.name ?? 'Unknown';
+  const message = commit?.commit.message ?? sha ?? '';
+  const authorName = commit?.commit.author.name ?? 'Unknown';
   const authorAvatar = commit?.author?.avatar_url ?? '';
-  const committedAt  = commit?.commit.author.date ?? '';
-  const files        = commit?.files ?? [];
+  const committedAt = commit?.commit.author.date ?? '';
+  const files = commit?.files ?? [];
 
   // Build simple dependency graph from files
   const depGraph = {
@@ -155,13 +192,12 @@ export default function CommitDetails() {
                   )}
                 </div>
               </div>
-              {risk ? (
-                <RiskBadge score={risk.overall_risk_score} showScore size="lg" />
-              ) : (
-                <Button onClick={handleAnalyze} disabled={isAnalyzing || !commit} className="gap-2">
-                  {isAnalyzing ? <><Loader2 className="h-4 w-4 animate-spin" />Analyzing…</> : <><Play className="h-4 w-4" />Analyze Commit</>}
+              <div className="flex items-center gap-3">
+                {risk && <RiskBadge score={risk.overall_risk_score} showScore size="lg" />}
+                <Button onClick={handleAnalyze} disabled={isAnalyzing || !commit} variant={risk ? 'outline' : 'default'} className="gap-2">
+                  {isAnalyzing ? <><Loader2 className="h-4 w-4 animate-spin" />{risk ? 'Re-running…' : 'Analyzing…'}</> : <><Play className="h-4 w-4" />{risk ? 'Re-run Analysis' : 'Analyze Commit'}</>}
                 </Button>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -173,38 +209,46 @@ export default function CommitDetails() {
               <>
                 {/* Risk scores */}
                 <div className="glass-card rounded-xl p-6 animate-slide-up">
-                  <h3 className="mb-4 text-lg font-semibold">Risk Analysis</h3>
-                  <div className="grid gap-6 md:grid-cols-2">
-                    <div className="space-y-4">
-                      <RiskScoreBar score={risk.correctness_risk ?? 0} label="Correctness" />
-                      <RiskScoreBar score={risk.security_risk ?? 0} label="Security" />
-                      <RiskScoreBar score={risk.maintainability_risk ?? 0} label="Maintainability" />
-                      <RiskScoreBar score={risk.integration_risk ?? 0} label="Integration" />
+                  <h3 className="mb-4 text-lg font-semibold">{selectedFilename ? 'File Risk Analysis' : 'Risk Analysis'}</h3>
+                  {(activeRiskMetrics as any)?.isNonCode ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center bg-secondary/20 rounded-xl border border-dashed border-muted-foreground/30">
+                      <FileCode className="h-10 w-10 text-muted-foreground/50 mb-3" />
+                      <p className="text-foreground font-medium">Non-Code File</p>
+                      <p className="text-sm text-muted-foreground mt-1 max-w-sm">Risk scores are not calculated for documentation, configuration, `.git`, or asset files.</p>
                     </div>
-                    <RiskRadarChart data={{
-                      correctness: risk.correctness_risk ?? 0,
-                      security: risk.security_risk ?? 0,
-                      maintainability: risk.maintainability_risk ?? 0,
-                      integration: risk.integration_risk ?? 0,
-                    }} />
-                  </div>
+                  ) : (
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <div className="space-y-4">
+                        <RiskScoreBar score={activeRiskMetrics?.correctness_risk ?? 0} label="Correctness" />
+                        <RiskScoreBar score={activeRiskMetrics?.security_risk ?? 0} label="Security" />
+                        <RiskScoreBar score={activeRiskMetrics?.maintainability_risk ?? 0} label="Maintainability" />
+                        <RiskScoreBar score={activeRiskMetrics?.integration_risk ?? 0} label="Integration" />
+                      </div>
+                      <RiskRadarChart data={{
+                        correctness: activeRiskMetrics?.correctness_risk ?? 0,
+                        security: activeRiskMetrics?.security_risk ?? 0,
+                        maintainability: activeRiskMetrics?.maintainability_risk ?? 0,
+                        integration: activeRiskMetrics?.integration_risk ?? 0,
+                      }} />
+                    </div>
+                  )}
                 </div>
 
                 {/* Risk reasons */}
                 <div className="glass-card rounded-xl p-6 animate-slide-up [animation-delay:100ms]">
                   <h3 className="mb-4 text-lg font-semibold flex items-center gap-2">
-                    <AlertCircle className="h-5 w-5 text-risk-high" />AI Risk Insights
+                    <AlertCircle className="h-5 w-5 text-risk-high" />AI Risk Insights {selectedFilename && <span className="text-xs font-normal text-muted-foreground bg-secondary px-2 py-0.5 rounded-md ml-2">{selectedFilename.split('/').pop()}</span>}
                   </h3>
                   <ul className="space-y-3">
-                    {(risk.risk_reasons ?? []).map((reason, i) => (
+                    {(activeRiskMetrics?.risk_reasons ?? []).map((reason, i) => (
                       <li key={i} className="flex items-start gap-3 rounded-lg bg-secondary/50 p-3 text-sm">
                         <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-risk-high/20 text-xs font-bold text-risk-high">{i + 1}</span>
                         <span className="text-foreground">{reason}</span>
                       </li>
                     ))}
                   </ul>
-                  {risk.mode && (
-                    <p className="mt-3 text-xs text-muted-foreground">Analysis mode: <span className="font-mono">{risk.mode}</span></p>
+                  {activeRiskMetrics?.mode && (
+                    <p className="mt-3 text-xs text-muted-foreground">Analysis mode: <span className="font-mono">{activeRiskMetrics.mode}</span></p>
                   )}
                 </div>
               </>
@@ -257,35 +301,54 @@ export default function CommitDetails() {
             {/* Files list */}
             {files.length > 0 && (
               <div className="glass-card rounded-xl p-6 animate-slide-up [animation-delay:250ms]">
-                <h3 className="mb-4 font-semibold">Files Changed</h3>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {files.map(file => (
-                    <div key={file.filename} className="flex items-center justify-between rounded-lg bg-secondary/50 p-3">
+                <h3 className="mb-4 font-semibold flex items-center justify-between">
+                  <span>Files Changed</span>
+                  {selectedFilename && (
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedFilename(null)} className="h-7 text-xs px-2">
+                      Clear Selection
+                    </Button>
+                  )}
+                </h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {files.map(file => {
+                    const isSelected = file.filename === selectedFilename;
+                    return (
+                    <div 
+                      key={file.filename} 
+                      onClick={() => setSelectedFilename(isSelected ? null : file.filename)}
+                      className={cn(
+                        "flex items-center justify-between rounded-lg p-3 cursor-pointer transition-colors",
+                        isSelected ? "bg-primary/20 ring-1 ring-primary" : "bg-secondary/50 hover:bg-secondary/80"
+                      )}
+                    >
                       <div className="flex items-center gap-2 min-w-0">
-                        <FileCode className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="truncate text-sm font-mono text-foreground">{file.filename.split('/').pop()}</span>
+                        <FileCode className={cn("h-4 w-4 shrink-0", isSelected ? "text-primary" : "text-muted-foreground")} />
+                        <span className={cn("truncate text-sm font-mono", isSelected ? "text-primary font-semibold" : "text-foreground")}>{file.filename.split('/').pop()}</span>
                       </div>
                       <span className={cn(
                         'shrink-0 rounded px-1.5 py-0.5 text-xs font-medium',
-                        file.status === 'added'    && 'bg-risk-low/20 text-risk-low',
+                        file.status === 'added' && 'bg-risk-low/20 text-risk-low',
                         file.status === 'modified' && 'bg-risk-medium/20 text-risk-medium',
-                        file.status === 'removed'  && 'bg-risk-high/20 text-risk-high',
-                        file.status === 'renamed'  && 'bg-primary/20 text-primary',
+                        file.status === 'removed' && 'bg-risk-high/20 text-risk-high',
+                        file.status === 'renamed' && 'bg-primary/20 text-primary',
                       )}>
                         {file.status}
                       </span>
                     </div>
-                  ))}
+                  )})}
                 </div>
               </div>
             )}
 
             {/* Patch preview */}
-            {files[0]?.patch && (
+            {(selectedFilename ? files.find(f => f.filename === selectedFilename) : files[0])?.patch && (
               <div className="glass-card rounded-xl p-6 animate-slide-up [animation-delay:350ms]">
-                <h3 className="mb-4 font-semibold">Patch Preview</h3>
+                <h3 className="mb-4 font-semibold flex items-center justify-between">
+                  <span>Patch Preview</span>
+                  {selectedFilename && <span className="text-xs font-normal text-muted-foreground truncate ml-4" title={selectedFilename}>{selectedFilename}</span>}
+                </h3>
                 <pre className="max-h-64 overflow-auto rounded-lg bg-background/80 p-4 text-xs font-mono scrollbar-thin">
-                  {files[0].patch.split('\n').map((line, i) => (
+                  {(selectedFilename ? files.find(f => f.filename === selectedFilename) : files[0])!.patch!.split('\n').map((line, i) => (
                     <div key={i} className={cn(
                       'py-0.5 px-2 -mx-2',
                       line.startsWith('+') && !line.startsWith('+++') && 'diff-add',
