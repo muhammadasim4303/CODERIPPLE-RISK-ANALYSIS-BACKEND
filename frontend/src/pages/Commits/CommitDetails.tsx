@@ -45,12 +45,12 @@ export default function CommitDetails() {
     const isGit = selectedFilename.toLowerCase().includes('.git');
     const isNonCode = NON_CODE_EXTS.includes(ext) || isGit;
     let finalReasons = fileRisk.risk_reasons ? [...fileRisk.risk_reasons] : [];
-    
+
     if (isNonCode) {
       finalReasons = ["Changed file is non code (documentation, asset, or config)"];
     }
     if (isEnv) {
-      finalReasons.unshift("⚠️ CRITICAL: Environmental file or credentials may have been pushed!");
+      finalReasons.unshift("CRITICAL: Environmental file or credentials may have been pushed!");
     }
 
     return {
@@ -60,7 +60,7 @@ export default function CommitDetails() {
       maintainability_risk: fileRisk.maintainability_risk ?? 0,
       integration_risk: fileRisk.integration_risk ?? 0,
       risk_reasons: finalReasons,
-      mode: 'file-level',
+      mode: risk.mode,
       isNonCode: isNonCode,
     };
   }, [risk, selectedFilename]);
@@ -72,7 +72,7 @@ export default function CommitDetails() {
       try {
         // Try Firebase first
         if (user) {
-          const fb = await getRiskScore(user.id, sha);
+          const fb = await getRiskScore(user.id, `${owner}/${repoName}`, sha);
           if (fb) {
             setRisk({
               sha: fb.sha, risk_label: fb.risk_label,
@@ -313,29 +313,30 @@ export default function CommitDetails() {
                   {files.map(file => {
                     const isSelected = file.filename === selectedFilename;
                     return (
-                    <div 
-                      key={file.filename} 
-                      onClick={() => setSelectedFilename(isSelected ? null : file.filename)}
-                      className={cn(
-                        "flex items-center justify-between rounded-lg p-3 cursor-pointer transition-colors",
-                        isSelected ? "bg-primary/20 ring-1 ring-primary" : "bg-secondary/50 hover:bg-secondary/80"
-                      )}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileCode className={cn("h-4 w-4 shrink-0", isSelected ? "text-primary" : "text-muted-foreground")} />
-                        <span className={cn("truncate text-sm font-mono", isSelected ? "text-primary font-semibold" : "text-foreground")}>{file.filename.split('/').pop()}</span>
+                      <div
+                        key={file.filename}
+                        onClick={() => setSelectedFilename(isSelected ? null : file.filename)}
+                        className={cn(
+                          "flex items-center justify-between rounded-lg p-3 cursor-pointer transition-colors",
+                          isSelected ? "bg-primary/20 ring-1 ring-primary" : "bg-secondary/50 hover:bg-secondary/80"
+                        )}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileCode className={cn("h-4 w-4 shrink-0", isSelected ? "text-primary" : "text-muted-foreground")} />
+                          <span className={cn("truncate text-sm font-mono", isSelected ? "text-primary font-semibold" : "text-foreground")}>{file.filename.split('/').pop()}</span>
+                        </div>
+                        <span className={cn(
+                          'shrink-0 rounded px-1.5 py-0.5 text-xs font-medium',
+                          file.status === 'added' && 'bg-risk-low/20 text-risk-low',
+                          file.status === 'modified' && 'bg-risk-medium/20 text-risk-medium',
+                          file.status === 'removed' && 'bg-risk-high/20 text-risk-high',
+                          file.status === 'renamed' && 'bg-primary/20 text-primary',
+                        )}>
+                          {file.status}
+                        </span>
                       </div>
-                      <span className={cn(
-                        'shrink-0 rounded px-1.5 py-0.5 text-xs font-medium',
-                        file.status === 'added' && 'bg-risk-low/20 text-risk-low',
-                        file.status === 'modified' && 'bg-risk-medium/20 text-risk-medium',
-                        file.status === 'removed' && 'bg-risk-high/20 text-risk-high',
-                        file.status === 'renamed' && 'bg-primary/20 text-primary',
-                      )}>
-                        {file.status}
-                      </span>
-                    </div>
-                  )})}
+                    )
+                  })}
                 </div>
               </div>
             )}

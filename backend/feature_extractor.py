@@ -309,6 +309,10 @@ def extract_features(data: dict) -> dict:
 
     # ── Security patterns ─────────────────────────────────────────────────
     _fname_ext_sec = ('.' + filename.lower().rsplit('.', 1)[-1]) if '.' in filename else ''
+    
+    critical_security_flag = 0
+    if re.search(r'^\+.*(?:window\..*(?:apiKey|ANON_KEY|env)|@csrf\.exempt)', patch, re.MULTILINE | re.IGNORECASE):
+        critical_security_flag = 1
     _pure_markup = {'.css', '.scss', '.sass', '.less', '.md', '.rst', '.txt',
                     '.yaml', '.yml', '.toml', '.ini', '.cfg', '.lock', '.svg'}
 
@@ -451,6 +455,7 @@ def extract_features(data: dict) -> dict:
         "critical_file_names": critical_files,
         "is_test_only":        is_test_only,
         "all_files":           all_files,
+        "critical_security_flag": critical_security_flag,
     }
     return all_features
 

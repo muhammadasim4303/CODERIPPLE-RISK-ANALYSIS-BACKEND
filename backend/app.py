@@ -124,6 +124,17 @@ def _has_critical_signals(features: dict) -> bool:
 
 
 def run_prediction(features: dict) -> dict:
+    meta = features.get("_meta", {})
+    if meta.get("critical_security_flag", 0) > 0:
+        return {
+            "pred_risk_score": 1.0,
+            "pred_risk_label": "CRITICAL RISK",
+            "pred_confidence": 0.99,
+            "probabilities": {"HIGH RISK": 0.99, "MEDIUM RISK": 0.01, "LOW RISK": 0.00},
+            "mode": "rule:critical_security",
+            "override_reason": "CRITICAL: Exposed API keys or disabled security middleware (@csrf.exempt) detected",
+        }
+
     trivial, trivial_reason = _is_trivial_commit(features)
     if trivial:
         return {
@@ -353,7 +364,9 @@ def analyze_batch():
     code_scores = [r["risk_score"] for r in results if not r.get("is_generated") and "risk_score" in r]
     agg_score   = max(code_scores) if code_scores else 0.05
 
-    if agg_score >= 0.65:
+    if agg_score >= 1.0:
+        agg_label = "CRITICAL RISK"
+    elif agg_score >= 0.65:
         agg_label = "HIGH RISK"
     elif agg_score >= 0.35:
         agg_label = "MEDIUM RISK"

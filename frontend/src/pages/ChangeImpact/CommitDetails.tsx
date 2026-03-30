@@ -8,7 +8,7 @@ import {
 import { MainLayout } from '@/components/layouts/MainLayout';
 import { getCommit, type GHCommit } from '@/lib/githubService';
 import { analyzeCommit, type RiskResult } from '@/lib/flaskService';
-import { upsertRiskScore, getRiskScore, analyzeAndStoreCR, type FBRiskScore } from '@/lib/firebaseService';
+import { upsertRiskScore, getRiskScore, getChangeImpactScore, analyzeAndStoreCR, type FBRiskScore, type FBChangeImpactScore } from '@/lib/firebaseService';
 import { RiskBadge, RiskScoreBar } from '@/components/common/RiskBadge';
 import { RiskRadarChart } from '@/components/charts/RiskRadarChart';
 import { DependencyGraph } from '@/components/graphs/DependencyGraph';
@@ -33,6 +33,7 @@ export default function CommitDetails() {
   const [commit, setCommit]           = useState<GHCommit | null>(null);
   const [risk, setRisk]               = useState<RiskResult | null>(null);
   const [fbScore, setFbScore]         = useState<FBRiskScore | null>(null);
+  const [ciScore, setCiScore]         = useState<FBChangeImpactScore | null>(null);
   const [isLoading, setIsLoading]     = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isCRRunning, setIsCRRunning] = useState(false);
@@ -44,7 +45,8 @@ export default function CommitDetails() {
       setIsLoading(true);
       try {
         if (user) {
-          const fb = await getRiskScore(user.id, sha);
+          // Load risk score
+          const fb = await getRiskScore(user.id, `${owner}/${repoName}`, sha);
           if (fb) {
             setFbScore(fb);
             setRisk({
@@ -59,6 +61,37 @@ export default function CommitDetails() {
               removed_lines: fb.deletions, files_touched: fb.files_changed,
               per_file: fb.per_file ?? [],
             });
+          }
+          // Load Change Impact score from dedicated collection
+          const ci = await getChangeImpactScore(user.id, `${owner}/${repoName}`, sha);
+          if (ci) {
+            setCiScore(ci);
+            // Also backfill fbScore cr_* fields if riskScore doc is missing them
+            if (fb && !fb.cr_analyzed) {
+              setFbScore(prev => prev ? {
+                ...prev,
+                cr_analyzed:              true,
+                cr_risk_prediction:       ci.risk_prediction,
+                cr_risk_score:            ci.risk_score,
+                cr_risk_confidence:       ci.risk_confidence,
+                cr_change_type:           ci.change_type,
+                cr_model_used:            ci.model_used,
+                cr_semantic_change_score: ci.semantic_change_score,
+                cr_similarity:            ci.similarity,
+                cr_ripple_depth:          ci.ripple_depth,
+                cr_ripple_size:           ci.ripple_size,
+                cr_direct_impact:         ci.direct_impact,
+                cr_indirect_impact:       ci.indirect_impact,
+                cr_impacted_files:        ci.impacted_files,
+                cr_changed_function:      ci.changed_function,
+                cr_changed_functions:     ci.changed_functions,
+                cr_functions_changed:     ci.functions_changed,
+                cr_total_lines_changed:   ci.total_lines_changed,
+                cr_contributing_factors:  ci.contributing_factors,
+                cr_feature_breakdown:     ci.feature_breakdown,
+                cr_dependency_graph:      ci.dependency_graph,
+              } : prev);
+            }
           }
         }
         if (owner && repoName) {
@@ -103,7 +136,7 @@ export default function CommitDetails() {
           per_file: result.per_file ?? [],
         };
         await upsertRiskScore(user.id, score);
-        const updated = await getRiskScore(user.id, sha);
+        const updated = await getRiskScore(user.id, `${owner}/${repoName}`, sha);
         if (updated) setFbScore(updated);
       }
       toast({ title: 'Risk analysis complete' });
@@ -119,10 +152,21 @@ export default function CommitDetails() {
     if (!sha || !user) return;
     setIsCRRunning(true);
     try {
-      const cr = await analyzeAndStoreCR(user.id, sha, `${owner}/${repoName}`);
+      const commitMeta = commit ? {
+        message:      commit.commit.message,
+        author_name:  commit.commit.author.name,
+        committed_at: commit.commit.author.date,
+      } : undefined;
+
+      const cr = await analyzeAndStoreCR(user.id, sha, `${owner}/${repoName}`, commitMeta);
       if (cr) {
-        const updated = await getRiskScore(user.id, sha);
+        // Refresh both the merged riskScore doc and the dedicated CI score
+        const [updated, ci] = await Promise.all([
+          getRiskScore(user.id, `${owner}/${repoName}`, sha),
+          getChangeImpactScore(user.id, `${owner}/${repoName}`, sha),
+        ]);
         if (updated) setFbScore(updated);
+        if (ci) setCiScore(ci);
         toast({ title: 'Change impact analysis complete', description: `${cr.functions_changed} functions analyzed · ripple depth ${cr.ripple_depth}` });
       } else {
         toast({ title: 'Change impact failed', variant: 'destructive' });
@@ -144,13 +188,45 @@ export default function CommitDetails() {
   const hasCR        = !!fbScore?.cr_analyzed;
 
   // ── Build dependency graph ────────────────────────────────────────────
+  // ── Helper: make a human-readable label from whatever the CR backend gives us ──
+  const formatNodeLabel = (rawLabel: string, nodeId: string, category: string): string => {
+    // Strip a leading "file::" prefix that the CR backend sometimes adds
+    const stripped = rawLabel.replace(/^file::/i, '').replace(/^func::/i, '');
+
+    // If the label is __file__ or blank, try to derive from id
+    if (!stripped || stripped === '__file__' || stripped === '__module__') {
+      // id might be "path/to/file.py" or "file.py::fn"
+      const base = nodeId.split('::')[0];
+      return base.split(/[/\\]/).pop() ?? base;
+    }
+
+    // If it looks like an absolute/relative path (contains / or \) and category is file-level
+    if ((stripped.includes('/') || stripped.includes('\\')) &&
+        (category === 'changed' || category === 'direct' || category === 'unaffected')) {
+      return stripped.split(/[/\\]/).pop() ?? stripped;
+    }
+
+    // If it contains :: it's file::function — for file nodes show just filename, for fn nodes show fn
+    if (stripped.includes('::')) {
+      const [filePart, fnPart] = stripped.split('::');
+      if (category === 'changed' || category === 'direct') {
+        // show the function name since file is an artifact-level container
+        return (fnPart || filePart.split(/[/\\]/).pop()) ?? filePart;
+      }
+      return fnPart || filePart;
+    }
+
+    return stripped;
+  };
+
   const depGraph = (() => {
     // Use real CR graph if available
     if (hasCR && fbScore?.cr_dependency_graph?.nodes?.length) {
       const { nodes, edges } = fbScore.cr_dependency_graph;
       return {
         nodes: nodes.map(n => ({
-          id: n.id, label: n.label,
+          id: n.id,
+          label: formatNodeLabel(n.label ?? '', n.id, n.category),
           type: (n.category === 'changed' ? 'source' : n.category === 'direct' ? 'impacted' : 'unaffected') as 'source' | 'impacted' | 'unaffected',
           risk_score: n.category === 'changed' ? 0.8 : n.category === 'direct' ? 0.5 : 0.2,
         })),
@@ -168,6 +244,7 @@ export default function CommitDetails() {
       edges: files.slice(1, 6).map((_, i) => ({ source: '1', target: String(i + 2), relationship: 'modifies' })),
     };
   })();
+
 
   return (
     <MainLayout>

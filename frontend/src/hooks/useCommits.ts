@@ -72,7 +72,7 @@ export function useCommits(owner?: string, repo?: string) {
         ghCommits.map(async (c): Promise<CommitRow> => {
           let risk: RiskResult | null = null;
           if (user) {
-            const fb = await getRiskScore(user.id, c.sha);
+            const fb = await getRiskScore(user.id, `${owner}/${repo}`, c.sha);
             if (fb) {
               risk = {
                 sha:                    fb.sha,

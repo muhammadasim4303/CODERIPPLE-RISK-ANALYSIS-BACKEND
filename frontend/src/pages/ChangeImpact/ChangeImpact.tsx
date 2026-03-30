@@ -10,7 +10,7 @@ import { PageLoader } from '@/components/common/Loader';
 import {
   GitCommit, FileCode, Search, Network, Layers, AlertTriangle,
   ChevronRight, Zap, GitBranch, ArrowRight, Brain,
-  Waves, FunctionSquare, Shield, RefreshCw,
+  Waves, FunctionSquare, Shield, RefreshCw, Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { truncateSha, formatRelativeTime } from '@/utils/formatters';
@@ -115,6 +115,7 @@ export default function ChangeImpact() {
   const [repoFilter, setRepoFilter] = useState('all');
   const [activeTab, setActiveTab] = useState<'graph' | 'functions' | 'ripple'>('graph');
   const [analyzing, setAnalyzing] = useState<string | null>(null);
+  const [isWiping, setIsWiping] = useState(false);
 
   const loadScores = async () => {
     if (!user) return;
@@ -157,7 +158,22 @@ export default function ChangeImpact() {
     } finally { setAnalyzing(null); }
   };
 
-  if (isLoading) return <MainLayout title="Change Impact"><PageLoader /></MainLayout>;
+  const handleWipeData = async () => {
+    if (!user || !window.confirm("Are you sure you want to permanently delete all analyzed commits and risk scores? This will reset the app to a clean state.")) return;
+    setIsWiping(true);
+    try {
+      const { wipeUserData } = await import('@/lib/firebaseService');
+      await wipeUserData(user.id);
+      setScores([]);
+      setSelected(null);
+      // Optional: hard reload the window to clear memory caches in useCommits
+      window.location.reload();
+    } finally {
+      setIsWiping(false);
+    }
+  };
+
+  if (isLoading || isWiping) return <MainLayout title="Change Impact"><PageLoader /></MainLayout>;
 
   return (
     <MainLayout title="Change Impact">
@@ -188,6 +204,14 @@ export default function ChangeImpact() {
                 {repos.map(r => <SelectItem key={r} value={r}>{r === 'all' ? 'All Repos' : r.split('/')[1] ?? r}</SelectItem>)}
               </SelectContent>
             </Select>
+            <button 
+              onClick={handleWipeData}
+              disabled={isWiping}
+              className="px-3 py-2 text-sm bg-risk-high/10 text-risk-high border border-risk-high/30 rounded-lg hover:bg-risk-high/20 transition-all font-medium flex items-center gap-2"
+              title="Permanently wipe all analyzed data"
+            >
+              <Trash2 className="h-4 w-4" /> Reset App
+            </button>
           </div>
         </div>
 

@@ -8,6 +8,9 @@ def generate_risk_reasons(features: dict, risk_label: str, risk_score: float) ->
     reasons = []
     meta    = features.get("_meta", {})
 
+    if meta.get("critical_security_flag"):
+        reasons.append("CRITICAL: Exposed API keys or disabled security middleware (@csrf.exempt) detected! (Score 100/100)")
+
     # ── Security ────────────────────────────────────────────────────────
     sec_hits = features.get("security_pattern_hits", 0)
     if sec_hits >= 15:
@@ -177,12 +180,16 @@ def derive_risk_categories(features: dict) -> dict:
     Heuristic sub-scores for correctness / security / maintainability / integration.
     These mirror the training labels but are computed rule-based for display.
     """
+    meta = features.get("_meta", {})
+    
     # Security
     sec = min(1.0, (
         features.get("security_pattern_hits", 0) * 0.15 +
         features.get("critical_files_count", 0) * 0.2 +
         features.get("has_new_deps", 0) * 0.1
     ))
+    if meta.get("critical_security_flag"):
+        sec = 1.0
 
     # Correctness (test coverage signal + complexity)
     cor = min(1.0, (
@@ -208,7 +215,9 @@ def derive_risk_categories(features: dict) -> dict:
 
     # ── Per-category reasons ──────────────────────────────────────────────
     sec_reasons = []
-    if features.get("security_pattern_hits", 0) > 0:
+    if meta.get("critical_security_flag"):
+        sec_reasons.append("CRITICAL: Exposed API keys or disabled security middleware (@csrf.exempt) detected!")
+    elif features.get("security_pattern_hits", 0) > 0:
         sec_reasons.append(f"Security-sensitive patterns detected ({features['security_pattern_hits']} hits)")
     if features.get("critical_files_count", 0) > 0:
         sec_reasons.append("Critical file(s) modified (auth/api/config/db)")
