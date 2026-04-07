@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Zap,
   Network,
+  Home,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useApp } from '@/context/AppContext';
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const navItems = [
+  { path: '/homepage', label: 'Home', icon: Home },
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/repos', label: 'Repositories', icon: GitBranch },
   { path: '/change-impact', label: 'Change Impact', icon: Network },

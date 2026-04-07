@@ -27,17 +27,17 @@ export default function CommitDetails() {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const owner    = searchParams.get('owner') ?? '';
-  const repoName = searchParams.get('repo')  ?? '';
+  const owner = searchParams.get('owner') ?? '';
+  const repoName = searchParams.get('repo') ?? '';
 
-  const [commit, setCommit]           = useState<GHCommit | null>(null);
-  const [risk, setRisk]               = useState<RiskResult | null>(null);
-  const [fbScore, setFbScore]         = useState<FBRiskScore | null>(null);
-  const [ciScore, setCiScore]         = useState<FBChangeImpactScore | null>(null);
-  const [isLoading, setIsLoading]     = useState(true);
+  const [commit, setCommit] = useState<GHCommit | null>(null);
+  const [risk, setRisk] = useState<RiskResult | null>(null);
+  const [fbScore, setFbScore] = useState<FBRiskScore | null>(null);
+  const [ciScore, setCiScore] = useState<FBChangeImpactScore | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isCRRunning, setIsCRRunning] = useState(false);
-  const [ciTab, setCiTab]             = useState<'graph' | 'functions' | 'ripple' | 'breakdown'>('graph');
+  const [ciTab, setCiTab] = useState<'graph' | 'functions' | 'ripple' | 'breakdown'>('graph');
 
   useEffect(() => {
     if (!sha) return;
@@ -70,26 +70,26 @@ export default function CommitDetails() {
             if (fb && !fb.cr_analyzed) {
               setFbScore(prev => prev ? {
                 ...prev,
-                cr_analyzed:              true,
-                cr_risk_prediction:       ci.risk_prediction,
-                cr_risk_score:            ci.risk_score,
-                cr_risk_confidence:       ci.risk_confidence,
-                cr_change_type:           ci.change_type,
-                cr_model_used:            ci.model_used,
+                cr_analyzed: true,
+                cr_risk_prediction: ci.risk_prediction,
+                cr_risk_score: ci.risk_score,
+                cr_risk_confidence: ci.risk_confidence,
+                cr_change_type: ci.change_type,
+                cr_model_used: ci.model_used,
                 cr_semantic_change_score: ci.semantic_change_score,
-                cr_similarity:            ci.similarity,
-                cr_ripple_depth:          ci.ripple_depth,
-                cr_ripple_size:           ci.ripple_size,
-                cr_direct_impact:         ci.direct_impact,
-                cr_indirect_impact:       ci.indirect_impact,
-                cr_impacted_files:        ci.impacted_files,
-                cr_changed_function:      ci.changed_function,
-                cr_changed_functions:     ci.changed_functions,
-                cr_functions_changed:     ci.functions_changed,
-                cr_total_lines_changed:   ci.total_lines_changed,
-                cr_contributing_factors:  ci.contributing_factors,
-                cr_feature_breakdown:     ci.feature_breakdown,
-                cr_dependency_graph:      ci.dependency_graph,
+                cr_similarity: ci.similarity,
+                cr_ripple_depth: ci.ripple_depth,
+                cr_ripple_size: ci.ripple_size,
+                cr_direct_impact: ci.direct_impact,
+                cr_indirect_impact: ci.indirect_impact,
+                cr_impacted_files: ci.impacted_files,
+                cr_changed_function: ci.changed_function,
+                cr_changed_functions: ci.changed_functions,
+                cr_functions_changed: ci.functions_changed,
+                cr_total_lines_changed: ci.total_lines_changed,
+                cr_contributing_factors: ci.contributing_factors,
+                cr_feature_breakdown: ci.feature_breakdown,
+                cr_dependency_graph: ci.dependency_graph,
               } : prev);
             }
           }
@@ -107,7 +107,7 @@ export default function CommitDetails() {
     load();
   }, [sha, owner, repoName, user]);
 
-  // ── Risk analysis (port 5000) ─────────────────────────────────────────
+  //  Risk analysis (port 5000) 
   const handleAnalyze = async () => {
     if (!sha || !commit) return;
     setIsAnalyzing(true);
@@ -147,14 +147,14 @@ export default function CommitDetails() {
     }
   };
 
-  // ── Change impact analysis (port 5001) — no risk, only impact ────────
+  //  Change impact analysis (port 5001) — no risk, only impact 
   const handleCRAnalysis = async () => {
     if (!sha || !user) return;
     setIsCRRunning(true);
     try {
       const commitMeta = commit ? {
-        message:      commit.commit.message,
-        author_name:  commit.commit.author.name,
+        message: commit.commit.message,
+        author_name: commit.commit.author.name,
         committed_at: commit.commit.author.date,
       } : undefined;
 
@@ -180,15 +180,15 @@ export default function CommitDetails() {
 
   if (isLoading) return <MainLayout><PageLoader /></MainLayout>;
 
-  const message      = commit?.commit.message ?? sha ?? '';
-  const authorName   = commit?.commit.author.name ?? 'Unknown';
+  const message = commit?.commit.message ?? sha ?? '';
+  const authorName = commit?.commit.author.name ?? 'Unknown';
   const authorAvatar = commit?.author?.avatar_url ?? '';
-  const committedAt  = commit?.commit.author.date ?? '';
-  const files        = commit?.files ?? [];
-  const hasCR        = !!fbScore?.cr_analyzed;
+  const committedAt = commit?.commit.author.date ?? '';
+  const files = commit?.files ?? [];
+  const hasCR = !!fbScore?.cr_analyzed;
 
-  // ── Build dependency graph ────────────────────────────────────────────
-  // ── Helper: make a human-readable label from whatever the CR backend gives us ──
+  //  Build dependency graph 
+  //  Helper: make a human-readable label from whatever the CR backend gives us 
   const formatNodeLabel = (rawLabel: string, nodeId: string, category: string): string => {
     // Strip a leading "file::" prefix that the CR backend sometimes adds
     const stripped = rawLabel.replace(/^file::/i, '').replace(/^func::/i, '');
@@ -202,7 +202,7 @@ export default function CommitDetails() {
 
     // If it looks like an absolute/relative path (contains / or \) and category is file-level
     if ((stripped.includes('/') || stripped.includes('\\')) &&
-        (category === 'changed' || category === 'direct' || category === 'unaffected')) {
+      (category === 'changed' || category === 'direct' || category === 'unaffected')) {
       return stripped.split(/[/\\]/).pop() ?? stripped;
     }
 
@@ -348,7 +348,7 @@ export default function CommitDetails() {
               </div>
             )}
 
-            {/* ── Change Impact section (CR backend, port 5001) ── */}
+            {/*  Change Impact section (CR backend, port 5001)  */}
             <div className="glass-card rounded-xl p-6 animate-slide-up [animation-delay:200ms]">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -372,10 +372,10 @@ export default function CommitDetails() {
               {hasCR && (
                 <div className="grid grid-cols-4 gap-3 mb-4">
                   {[
-                    { label: 'Functions',    value: fbScore?.cr_functions_changed ?? 0,                    icon: <FunctionSquare className="h-3.5 w-3.5" /> },
-                    { label: 'Lines',        value: fbScore?.cr_total_lines_changed ?? 0,                  icon: <FileCode className="h-3.5 w-3.5" /> },
-                    { label: 'Ripple nodes', value: fbScore?.cr_ripple_size ?? 0,                          icon: <Waves className="h-3.5 w-3.5" /> },
-                    { label: 'Depth',        value: `d${fbScore?.cr_ripple_depth ?? 0}`,                  icon: <Zap className="h-3.5 w-3.5" /> },
+                    { label: 'Functions', value: fbScore?.cr_functions_changed ?? 0, icon: <FunctionSquare className="h-3.5 w-3.5" /> },
+                    { label: 'Lines', value: fbScore?.cr_total_lines_changed ?? 0, icon: <FileCode className="h-3.5 w-3.5" /> },
+                    { label: 'Ripple nodes', value: fbScore?.cr_ripple_size ?? 0, icon: <Waves className="h-3.5 w-3.5" /> },
+                    { label: 'Depth', value: `d${fbScore?.cr_ripple_depth ?? 0}`, icon: <Zap className="h-3.5 w-3.5" /> },
                   ].map(m => (
                     <div key={m.label} className="rounded-lg bg-secondary/50 p-2 text-center">
                       <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">{m.icon}<span className="text-[10px]">{m.label}</span></div>
@@ -389,10 +389,10 @@ export default function CommitDetails() {
               {hasCR && (
                 <div className="flex items-center gap-1 bg-secondary/40 rounded-lg p-1 border border-border mb-4">
                   {([
-                    { id: 'graph',     label: 'Dependency Graph', icon: <Network className="h-3.5 w-3.5" /> },
-                    { id: 'functions', label: 'Functions',        icon: <FunctionSquare className="h-3.5 w-3.5" /> },
-                    { id: 'ripple',    label: 'Ripple Effect',    icon: <Zap className="h-3.5 w-3.5" /> },
-                    { id: 'breakdown', label: 'Feature Scores',   icon: <BarChart3 className="h-3.5 w-3.5" /> },
+                    { id: 'graph', label: 'Dependency Graph', icon: <Network className="h-3.5 w-3.5" /> },
+                    { id: 'functions', label: 'Functions', icon: <FunctionSquare className="h-3.5 w-3.5" /> },
+                    { id: 'ripple', label: 'Ripple Effect', icon: <Zap className="h-3.5 w-3.5" /> },
+                    { id: 'breakdown', label: 'Feature Scores', icon: <BarChart3 className="h-3.5 w-3.5" /> },
                   ] as const).map(tab => (
                     <button key={tab.id} onClick={() => setCiTab(tab.id)}
                       className={cn('flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-all',
@@ -436,35 +436,35 @@ export default function CommitDetails() {
                 <div className="space-y-2 max-h-[320px] overflow-y-auto">
                   {(fbScore?.cr_changed_functions ?? []).length > 0
                     ? (fbScore!.cr_changed_functions!.map((fn: CRChangedFunction, i: number) => {
-                        const pct = Math.round(fn.similarity * 100);
-                        const col = fn.similarity >= 0.97 ? '#4ade80' : fn.similarity >= 0.92 ? '#facc15' : fn.similarity >= 0.75 ? '#fb923c' : '#f87171';
-                        const ctLabel = fn.change_type === 'LOGIC_CHANGE' ? 'Logic Change' : fn.change_type === 'REFACTOR' ? 'Refactor' : 'Format Only';
-                        const ctColor = fn.change_type === 'LOGIC_CHANGE' ? 'text-risk-high bg-risk-high/10 border-risk-high/30'
-                                      : fn.change_type === 'REFACTOR'     ? 'text-warning bg-warning/10 border-warning/30'
-                                      :                                      'text-muted-foreground bg-secondary/60 border-border';
-                        return (
-                          <div key={i} className="rounded-lg border border-border/50 bg-secondary/30 p-3 space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <FunctionSquare className="h-3.5 w-3.5 shrink-0 text-primary" />
-                                <span className="font-mono text-xs text-foreground truncate">{fn.function}</span>
-                              </div>
-                              <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0', ctColor)}>{ctLabel}</span>
+                      const pct = Math.round(fn.similarity * 100);
+                      const col = fn.similarity >= 0.97 ? '#4ade80' : fn.similarity >= 0.92 ? '#facc15' : fn.similarity >= 0.75 ? '#fb923c' : '#f87171';
+                      const ctLabel = fn.change_type === 'LOGIC_CHANGE' ? 'Logic Change' : fn.change_type === 'REFACTOR' ? 'Refactor' : 'Format Only';
+                      const ctColor = fn.change_type === 'LOGIC_CHANGE' ? 'text-risk-high bg-risk-high/10 border-risk-high/30'
+                        : fn.change_type === 'REFACTOR' ? 'text-warning bg-warning/10 border-warning/30'
+                          : 'text-muted-foreground bg-secondary/60 border-border';
+                      return (
+                        <div key={i} className="rounded-lg border border-border/50 bg-secondary/30 p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FunctionSquare className="h-3.5 w-3.5 shrink-0 text-primary" />
+                              <span className="font-mono text-xs text-foreground truncate">{fn.function}</span>
                             </div>
-                            <div className="text-[10px] text-muted-foreground truncate">{fn.file}</div>
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-1 rounded-full bg-secondary overflow-hidden">
-                                <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: col }} />
-                              </div>
-                              <span className="text-[10px] font-mono shrink-0" style={{ color: col }}>{pct}% similar</span>
-                            </div>
-                            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                              <span className="text-emerald-400">+{fn.added_lines}</span>
-                              <span className="text-rose-400">−{fn.removed_lines}</span>
-                            </div>
+                            <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0', ctColor)}>{ctLabel}</span>
                           </div>
-                        );
-                      }))
+                          <div className="text-[10px] text-muted-foreground truncate">{fn.file}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-1 rounded-full bg-secondary overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: col }} />
+                            </div>
+                            <span className="text-[10px] font-mono shrink-0" style={{ color: col }}>{pct}% similar</span>
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                            <span className="text-emerald-400">+{fn.added_lines}</span>
+                            <span className="text-rose-400">−{fn.removed_lines}</span>
+                          </div>
+                        </div>
+                      );
+                    }))
                     : <p className="text-sm text-center text-muted-foreground py-8">No function-level data</p>
                   }
                 </div>
@@ -480,14 +480,14 @@ export default function CommitDetails() {
                     </div>
                     {(fbScore?.cr_direct_impact ?? []).length > 0
                       ? <div className="space-y-1.5">
-                          {fbScore!.cr_direct_impact!.map((fn, i) => (
-                            <div key={i} className="flex items-center gap-2 text-xs rounded-lg bg-risk-high/5 border border-risk-high/20 px-3 py-2">
-                              <ArrowRight className="h-3 w-3 text-risk-high shrink-0" />
-                              <span className="font-mono text-foreground truncate">{fn.split('::')[1] ?? fn}</span>
-                              <span className="text-muted-foreground text-[10px] ml-auto truncate">{fn.split('::')[0]}</span>
-                            </div>
-                          ))}
-                        </div>
+                        {fbScore!.cr_direct_impact!.map((fn, i) => (
+                          <div key={i} className="flex items-center gap-2 text-xs rounded-lg bg-risk-high/5 border border-risk-high/20 px-3 py-2">
+                            <ArrowRight className="h-3 w-3 text-risk-high shrink-0" />
+                            <span className="font-mono text-foreground truncate">{fn.split('::')[1] ?? fn}</span>
+                            <span className="text-muted-foreground text-[10px] ml-auto truncate">{fn.split('::')[0]}</span>
+                          </div>
+                        ))}
+                      </div>
                       : <p className="text-xs text-muted-foreground italic">No direct dependents — isolated change</p>
                     }
                   </div>
@@ -498,14 +498,14 @@ export default function CommitDetails() {
                     </div>
                     {(fbScore?.cr_indirect_impact ?? []).length > 0
                       ? <div className="space-y-1.5">
-                          {fbScore!.cr_indirect_impact!.map((fn, i) => (
-                            <div key={i} className="flex items-center gap-2 text-xs rounded-lg bg-warning/5 border border-warning/20 px-3 py-2">
-                              <ChevronRight className="h-3 w-3 text-warning shrink-0" />
-                              <span className="font-mono text-foreground truncate">{fn.split('::')[1] ?? fn}</span>
-                              <span className="text-muted-foreground text-[10px] ml-auto truncate">{fn.split('::')[0]}</span>
-                            </div>
-                          ))}
-                        </div>
+                        {fbScore!.cr_indirect_impact!.map((fn, i) => (
+                          <div key={i} className="flex items-center gap-2 text-xs rounded-lg bg-warning/5 border border-warning/20 px-3 py-2">
+                            <ChevronRight className="h-3 w-3 text-warning shrink-0" />
+                            <span className="font-mono text-foreground truncate">{fn.split('::')[1] ?? fn}</span>
+                            <span className="text-muted-foreground text-[10px] ml-auto truncate">{fn.split('::')[0]}</span>
+                          </div>
+                        ))}
+                      </div>
                       : <p className="text-xs text-muted-foreground italic">No indirect propagation detected</p>
                     }
                   </div>
@@ -530,18 +530,18 @@ export default function CommitDetails() {
                 <div className="space-y-3">
                   {fbScore?.cr_feature_breakdown && Object.keys(fbScore.cr_feature_breakdown).length > 0
                     ? Object.entries(fbScore.cr_feature_breakdown).sort(([, a], [, b]) => b - a).map(([k, v]) => {
-                        const pct = Math.round(v * 100);
-                        const col = v >= 0.7 ? 'bg-risk-high' : v >= 0.4 ? 'bg-warning' : 'bg-primary';
-                        return (
-                          <div key={k} className="flex items-center gap-3 text-xs">
-                            <span className="w-28 shrink-0 text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</span>
-                            <div className="flex-1 h-1.5 rounded-full bg-secondary/80 overflow-hidden">
-                              <div className={cn('h-full rounded-full', col)} style={{ width: `${pct}%` }} />
-                            </div>
-                            <span className="w-8 text-right font-mono text-foreground">{pct}%</span>
+                      const pct = Math.round(v * 100);
+                      const col = v >= 0.7 ? 'bg-risk-high' : v >= 0.4 ? 'bg-warning' : 'bg-primary';
+                      return (
+                        <div key={k} className="flex items-center gap-3 text-xs">
+                          <span className="w-28 shrink-0 text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</span>
+                          <div className="flex-1 h-1.5 rounded-full bg-secondary/80 overflow-hidden">
+                            <div className={cn('h-full rounded-full', col)} style={{ width: `${pct}%` }} />
                           </div>
-                        );
-                      })
+                          <span className="w-8 text-right font-mono text-foreground">{pct}%</span>
+                        </div>
+                      );
+                    })
                     : <p className="text-sm text-center text-muted-foreground py-8">No feature data</p>
                   }
                 </div>
@@ -595,10 +595,10 @@ export default function CommitDetails() {
                       </div>
                       <span className={cn(
                         'shrink-0 rounded px-1.5 py-0.5 text-xs font-medium',
-                        file.status === 'added'    && 'bg-risk-low/20 text-risk-low',
+                        file.status === 'added' && 'bg-risk-low/20 text-risk-low',
                         file.status === 'modified' && 'bg-risk-medium/20 text-risk-medium',
-                        file.status === 'removed'  && 'bg-risk-high/20 text-risk-high',
-                        file.status === 'renamed'  && 'bg-primary/20 text-primary',
+                        file.status === 'removed' && 'bg-risk-high/20 text-risk-high',
+                        file.status === 'renamed' && 'bg-primary/20 text-primary',
                       )}>
                         {file.status}
                       </span>

@@ -9,7 +9,7 @@ def generate_risk_reasons(features: dict, risk_label: str, risk_score: float) ->
     meta    = features.get("_meta", {})
 
     if meta.get("critical_security_flag"):
-        reasons.append("CRITICAL: Exposed API keys or disabled security middleware (@csrf.exempt) detected! (Score 100/100)")
+        reasons.append("CRITICAL: Exposed API keys or disabled security middleware")
 
     # ── Security ────────────────────────────────────────────────────────
     sec_hits = features.get("security_pattern_hits", 0)

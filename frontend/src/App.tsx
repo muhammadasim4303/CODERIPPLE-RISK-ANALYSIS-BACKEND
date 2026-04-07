@@ -17,6 +17,7 @@ import ChangeImpact from "./pages/ChangeImpact/ChangeImpact";
 import RiskOverview from "./pages/RiskAnalysis/RiskOverview";
 import Settings from "./pages/Settings/Settings";
 import NotFound from "./pages/NotFound";
+import Homepage from "./pages/Homepage/Homepage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +54,7 @@ const App = () => (
                 <Route path="/change-impact" element={<ChangeImpact />} />
                 <Route path="/risk-overview" element={<RiskOverview />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/homepage" element={<Homepage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>

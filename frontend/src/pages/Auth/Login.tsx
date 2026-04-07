@@ -10,14 +10,18 @@ import { cn } from '@/lib/utils';
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login, signup, loginWithGitHub, isAuthenticated, isLoading } = useAuth();
+  const { login, signup, loginWithGitHub, isAuthenticated, isLoading, authProvider } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'login' | 'signup'>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '', username: '', confirmPassword: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [signupSuccess, setSignupSuccess] = useState(false);
 
-  if (isAuthenticated) { navigate('/dashboard'); return null; }
+  if (isAuthenticated) {
+    navigate(authProvider === 'github' ? '/dashboard' : '/homepage');
+    return null;
+  }
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -37,11 +41,23 @@ export default function Login() {
     ev.preventDefault();
     if (!validate()) return;
     try {
-      if (activeTab === 'login') await login(formData.email, formData.password);
-      else await signup(formData.email, formData.password, formData.username);
-      navigate('/dashboard');
+      if (activeTab === 'login') {
+        await login(formData.email, formData.password);
+        navigate('/homepage');
+      } else {
+        await signup(formData.email, formData.password, formData.username);
+        // Supabase sends a confirmation email — don't navigate yet
+        setSignupSuccess(true);
+      }
     } catch (err: any) {
-      setErrors({ form: err?.message ?? 'Authentication failed. Please try again.' });
+      const msg: string = err?.message ?? '';
+      if (msg.toLowerCase().includes('email not confirmed')) {
+        setErrors({ form: 'Please confirm your email address first. Check your inbox for a confirmation link.' });
+      } else if (msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('email rate')) {
+        setErrors({ form: 'Too many sign-up attempts. Please wait a few minutes and try again, or use "Continue with GitHub" instead.' });
+      } else {
+        setErrors({ form: msg || 'Authentication failed. Please try again.' });
+      }
     }
   };
 
@@ -118,6 +134,12 @@ export default function Login() {
                   <TabsTrigger value="login" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Sign In</TabsTrigger>
                   <TabsTrigger value="signup" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Sign Up</TabsTrigger>
                 </TabsList>
+
+                {signupSuccess && (
+                  <div className="mb-4 rounded-lg bg-risk-low/10 border border-risk-low/30 p-3 text-sm text-risk-low">
+                    Account created! Check your email and click the confirmation link, then sign in.
+                  </div>
+                )}
 
                 {errors.form && (
                   <div className="mb-4 rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">{errors.form}</div>

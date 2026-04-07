@@ -47,7 +47,9 @@ export interface FBRepo {
 
 export interface FBFileScore {
   file: string;
-  patch: string;
+  // patch is stripped by trimPerFile() before writing to Firestore (too large).
+  // Kept optional here so FileRiskResult (which carries patch for the UI) is assignable.
+  patch?: string;
   risk_score: number;
   risk_label: string;
   correctness_risk: number;
@@ -91,26 +93,26 @@ export interface FBRiskScore {
   per_file: FBFileScore[];
 
   // ── CodeRipple enrichment (optional — present after CR analysis) ──────
-  cr_analyzed?:              boolean;
-  cr_risk_prediction?:       'LOW' | 'MEDIUM' | 'HIGH';
-  cr_risk_score?:            number;
-  cr_risk_confidence?:       number;
-  cr_change_type?:           string;
-  cr_model_used?:            string;
+  cr_analyzed?: boolean;
+  cr_risk_prediction?: 'LOW' | 'MEDIUM' | 'HIGH';
+  cr_risk_score?: number;
+  cr_risk_confidence?: number;
+  cr_change_type?: string;
+  cr_model_used?: string;
   cr_semantic_change_score?: number;
-  cr_similarity?:            number;
-  cr_ripple_depth?:          number;
-  cr_ripple_size?:           number;
-  cr_direct_impact?:         string[];
-  cr_indirect_impact?:       string[];
-  cr_impacted_files?:        string[];
-  cr_changed_function?:      string | null;
-  cr_changed_functions?:     CRChangedFunction[];
-  cr_functions_changed?:     number;
-  cr_total_lines_changed?:   number;
-  cr_contributing_factors?:  string[];
-  cr_feature_breakdown?:     Record<string, number>;
-  cr_dependency_graph?:      CRDependencyGraph;
+  cr_similarity?: number;
+  cr_ripple_depth?: number;
+  cr_ripple_size?: number;
+  cr_direct_impact?: string[];
+  cr_indirect_impact?: string[];
+  cr_impacted_files?: string[];
+  cr_changed_function?: string | null;
+  cr_changed_functions?: CRChangedFunction[];
+  cr_functions_changed?: number;
+  cr_total_lines_changed?: number;
+  cr_contributing_factors?: string[];
+  cr_feature_breakdown?: Record<string, number>;
+  cr_dependency_graph?: CRDependencyGraph;
 }
 
 // ─── Change Impact Score (dedicated collection) ───────────────────────────────
@@ -189,10 +191,19 @@ export async function updateRepoStats(
 /** Helper: derive repoId consistent with upsertRepo */
 function repoId(repoFullName: string) { return repoFullName.replace('/', '_'); }
 
+/** Strip large text blobs from per-file entries before writing to Firestore. */
+function trimPerFile(perFile: FBFileScore[]): FBFileScore[] {
+  return perFile.map(({ patch: _patch, ...rest }: any) => rest as FBFileScore);
+}
+
 export async function upsertRiskScore(userId: string, score: Omit<FBRiskScore, 'userId'>): Promise<void> {
+  const trimmed = {
+    ...score,
+    per_file: trimPerFile(score.per_file ?? []),
+  };
   await setDoc(
     doc(db, 'users', userId, 'repositories', repoId(score.repoFullName), 'riskScores', score.sha),
-    clean({ ...score, userId, analyzed_at: new Date().toISOString() }),
+    clean({ ...trimmed, userId, analyzed_at: new Date().toISOString() }),
     { merge: true }
   );
 }
@@ -295,9 +306,9 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
     listAllRiskScores(userId),
   ]);
 
-  const high   = scores.filter(s => s.risk_label === 'HIGH RISK').length;
+  const high = scores.filter(s => s.risk_label === 'HIGH RISK').length;
   const medium = scores.filter(s => s.risk_label === 'MEDIUM RISK').length;
-  const low    = scores.filter(s => s.risk_label === 'LOW RISK').length;
+  const low = scores.filter(s => s.risk_label === 'LOW RISK').length;
   const avgRisk = scores.length
     ? scores.reduce((acc, s) => acc + s.overall_risk_score, 0) / scores.length
     : 0;
@@ -306,10 +317,10 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
   for (const s of scores) {
     const cur = repoMap.get(s.repoFullName) ?? { sum: 0, count: 0, high: 0, name: s.repoFullName.split('/')[1] };
     repoMap.set(s.repoFullName, {
-      sum:   cur.sum + s.overall_risk_score,
+      sum: cur.sum + s.overall_risk_score,
       count: cur.count + 1,
-      high:  cur.high + (s.risk_label === 'HIGH RISK' ? 1 : 0),
-      name:  cur.name,
+      high: cur.high + (s.risk_label === 'HIGH RISK' ? 1 : 0),
+      name: cur.name,
     });
   }
 
@@ -322,8 +333,8 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
   const WEEK = 7 * 24 * 3600 * 1000;
   const risk_trend = Array.from({ length: 7 }, (_, i) => {
     const start = now - (7 - i) * WEEK;
-    const end   = now - (6 - i) * WEEK;
-    const week  = scores.filter(s => {
+    const end = now - (6 - i) * WEEK;
+    const week = scores.filter(s => {
       const t = new Date(s.committed_at).getTime();
       return t >= start && t < end;
     });
@@ -363,26 +374,26 @@ export async function mergeCodeRippleResult(
 ): Promise<void> {
   const ref = doc(db, 'users', userId, 'repositories', repoId(repoFullName), 'riskScores', sha);
   await setDoc(ref, {
-    cr_analyzed:              true,
-    cr_risk_prediction:       cr.risk_prediction,
-    cr_risk_score:            cr.risk_score,
-    cr_risk_confidence:       cr.risk_confidence,
-    cr_change_type:           cr.change_type,
-    cr_model_used:            cr.model_used,
+    cr_analyzed: true,
+    cr_risk_prediction: cr.risk_prediction,
+    cr_risk_score: cr.risk_score,
+    cr_risk_confidence: cr.risk_confidence,
+    cr_change_type: cr.change_type,
+    cr_model_used: cr.model_used,
     cr_semantic_change_score: cr.semantic_change_score,
-    cr_similarity:            cr.similarity,
-    cr_ripple_depth:          cr.ripple_depth,
-    cr_ripple_size:           cr.ripple_size,
-    cr_direct_impact:         cr.direct_impact,
-    cr_indirect_impact:       cr.indirect_impact,
-    cr_impacted_files:        cr.impacted_files,
-    cr_changed_function:      cr.changed_function,
-    cr_changed_functions:     cr.changed_functions,
-    cr_functions_changed:     cr.functions_changed,
-    cr_total_lines_changed:   cr.total_lines_changed,
-    cr_contributing_factors:  cr.contributing_factors,
-    cr_feature_breakdown:     cr.feature_breakdown,
-    cr_dependency_graph:      cr.dependency_graph,
+    cr_similarity: cr.similarity,
+    cr_ripple_depth: cr.ripple_depth,
+    cr_ripple_size: cr.ripple_size,
+    cr_direct_impact: cr.direct_impact,
+    cr_indirect_impact: cr.indirect_impact,
+    cr_impacted_files: cr.impacted_files,
+    cr_changed_function: cr.changed_function,
+    cr_changed_functions: cr.changed_functions,
+    cr_functions_changed: cr.functions_changed,
+    cr_total_lines_changed: cr.total_lines_changed,
+    cr_contributing_factors: cr.contributing_factors,
+    cr_feature_breakdown: cr.feature_breakdown,
+    cr_dependency_graph: cr.dependency_graph,
   }, { merge: true });
 }
 
@@ -420,25 +431,25 @@ export async function analyzeAndStoreCR(
       repoFullName,
       analyzed_at: new Date().toISOString(),
       ...(commitMeta ?? {}),
-      risk_prediction:       cr.risk_prediction,
-      risk_score:            cr.risk_score,
-      risk_confidence:       cr.risk_confidence,
-      change_type:           cr.change_type,
-      model_used:            cr.model_used,
+      risk_prediction: cr.risk_prediction,
+      risk_score: cr.risk_score,
+      risk_confidence: cr.risk_confidence,
+      change_type: cr.change_type,
+      model_used: cr.model_used,
       semantic_change_score: cr.semantic_change_score,
-      similarity:            cr.similarity,
-      ripple_depth:          cr.ripple_depth,
-      ripple_size:           cr.ripple_size,
-      direct_impact:         cr.direct_impact,
-      indirect_impact:       cr.indirect_impact,
-      impacted_files:        cr.impacted_files,
-      changed_function:      cr.changed_function,
-      changed_functions:     cr.changed_functions,
-      functions_changed:     cr.functions_changed,
-      total_lines_changed:   cr.total_lines_changed,
-      contributing_factors:  cr.contributing_factors,
-      feature_breakdown:     cr.feature_breakdown,
-      dependency_graph:      cr.dependency_graph,
+      similarity: cr.similarity,
+      ripple_depth: cr.ripple_depth,
+      ripple_size: cr.ripple_size,
+      direct_impact: cr.direct_impact,
+      indirect_impact: cr.indirect_impact,
+      impacted_files: cr.impacted_files,
+      changed_function: cr.changed_function,
+      changed_functions: cr.changed_functions,
+      functions_changed: cr.functions_changed,
+      total_lines_changed: cr.total_lines_changed,
+      contributing_factors: cr.contributing_factors,
+      feature_breakdown: cr.feature_breakdown,
+      dependency_graph: cr.dependency_graph,
     };
     await upsertChangeImpactScore(userId, ciScore);
 
@@ -466,5 +477,5 @@ export async function wipeUserData(userId: string): Promise<void> {
     })
   );
   // Wipe parent doc
-  try { await deleteDoc(doc(db, 'users', userId)); } catch (e) {}
+  try { await deleteDoc(doc(db, 'users', userId)); } catch (e) { }
 }
