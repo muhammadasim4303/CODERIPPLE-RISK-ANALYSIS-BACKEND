@@ -13,6 +13,7 @@ import {
   query, where, orderBy, limit, updateDoc, deleteDoc,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { analyzeCommit, deleteCachedRisk, type RiskResult } from './flaskService';
 import type { CodeRippleResult, CRChangedFunction, CRDependencyGraph } from '@/types/coderippleTypes';
 
 function clean<T extends object>(obj: T): T {
@@ -284,6 +285,68 @@ export async function listChangeImpactScoresByRepo(
     )
   );
   return snap.docs.map(d => d.data() as FBChangeImpactScore);
+}
+
+// ─── Deletion ─────────────────────────────────────────────────────────────────
+
+export async function deleteRiskScore(
+  userId: string,
+  repoFullName: string,
+  sha: string
+): Promise<void> {
+  const ref = doc(db, 'users', userId, 'repositories', repoId(repoFullName), 'riskScores', sha);
+  await deleteDoc(ref);
+  
+  // Also clear the backend in-memory cache
+  try {
+    await deleteCachedRisk(sha);
+  } catch (err) {
+    console.error('[FirebaseService] Failed to clear backend cache', err);
+  }
+  
+  // Also delete from changeImpactScores if it exists to maintain consistency
+  const ciRef = doc(db, 'users', userId, 'repositories', repoId(repoFullName), 'changeImpactScores', sha);
+  const ciSnap = await getDoc(ciRef);
+  if (ciSnap.exists()) {
+    await deleteDoc(ciRef);
+  }
+}
+
+export async function deleteChangeImpactScore(
+  userId: string,
+  repoFullName: string,
+  sha: string
+): Promise<void> {
+  const ciRef = doc(db, 'users', userId, 'repositories', repoId(repoFullName), 'changeImpactScores', sha);
+  await deleteDoc(ciRef);
+
+  // Clear cr_ fields from riskScores doc if it exists
+  const riskRef = doc(db, 'users', userId, 'repositories', repoId(repoFullName), 'riskScores', sha);
+  const riskSnap = await getDoc(riskRef);
+  if (riskSnap.exists()) {
+    await updateDoc(riskRef, {
+      cr_analyzed: false,
+      cr_risk_prediction: null,
+      cr_risk_score: null,
+      cr_risk_confidence: null,
+      cr_change_type: null,
+      cr_model_used: null,
+      cr_semantic_change_score: null,
+      cr_similarity: null,
+      cr_ripple_depth: null,
+      cr_ripple_size: null,
+      cr_direct_impact: null,
+      cr_indirect_impact: null,
+      cr_impacted_files: null,
+      cr_changed_function: null,
+      cr_changed_functions: null,
+      cr_functions_changed: null,
+      cr_total_lines_changed: null,
+      cr_contributing_factors: null,
+      cr_feature_breakdown: null,
+      cr_dependency_graph: null,
+    });
+  }
 }
 
 // ─── Dashboard aggregation ────────────────────────────────────────────────────

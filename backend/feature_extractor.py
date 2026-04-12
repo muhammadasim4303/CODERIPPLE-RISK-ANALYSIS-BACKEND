@@ -35,6 +35,46 @@ def is_test_file(filename: str) -> bool:
     )
 
 
+# Patterns that indicate a file likely contains secrets or credentials
+_SENSITIVE_NAME_PATTERNS = [
+    ".env", ".env.",          # .env, .env.local, .env.production, etc.
+    "secrets",                 # secrets.json, .secrets, secrets.yaml
+    "credentials",             # credentials.json, aws_credentials
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",  # SSH private keys
+    "private.key", "private_key",
+    ".keystore",               # Android keystore
+]
+_SENSITIVE_EXT_PATTERNS = {
+    ".pem", ".key", ".pfx", ".p12", ".jks",  # certs / keystores
+    ".cer", ".crt", ".der",                   # certificate files
+}
+_SENSITIVE_EXACT_NAMES = {
+    "google-services.json",    # Firebase / GCP service account
+    "service_account.json",
+    "serviceaccount.json",
+    "client_secret.json",      # OAuth client secrets
+    "gcloud_service_key.json",
+    ".htpasswd",
+    "shadow", "passwd",        # Unix password files
+    "wallet.dat",              # crypto wallets
+    "*.pgp", "*.gpg",
+}
+
+
+def is_sensitive_file(filename: str) -> bool:
+    """Return True if the filename looks like it contains credentials or secrets."""
+    fname   = filename.lower()
+    # Basename only (strip directory)
+    base    = fname.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    ext     = ("."+base.rsplit(".", 1)[-1]) if "." in base else ""
+
+    if base in _SENSITIVE_EXACT_NAMES:
+        return True
+    if ext in _SENSITIVE_EXT_PATTERNS:
+        return True
+    return any(pat in fname for pat in _SENSITIVE_NAME_PATTERNS)
+
+
 def is_critical_file(filename: str) -> bool:
     fname = filename.lower()
 
@@ -185,6 +225,7 @@ def extract_features(data: dict) -> dict:
     old_code     = normalize_code(data.get("old_contents", ""))
     new_code     = normalize_code(data.get("new_contents", ""))
     filename     = data.get("file", "")
+    description  = data.get("description", data.get("messages", ""))
 
     # ── Short-circuit: generated/compiled/lock files → zero all signals ───
     if is_generated_file(filename):
@@ -224,6 +265,7 @@ def extract_features(data: dict) -> dict:
             "is_test_only": False,
             "all_files": [filename] if filename else [],
             "is_generated": True,
+            "description": description,
         }
         return zero
 
@@ -309,10 +351,33 @@ def extract_features(data: dict) -> dict:
 
     # ── Security patterns ─────────────────────────────────────────────────
     _fname_ext_sec = ('.' + filename.lower().rsplit('.', 1)[-1]) if '.' in filename else ''
-    
+
+    # ── Critical security flag: 100% score triggers ───────────────────────
+    # Only fires when genuinely dangerous secrets are hardcoded or SQL injection
+    # patterns are present. NOT triggered by comment mentions or variable names.
+    _critical_patterns = [
+        # Hardcoded secrets assigned in code
+        # e.g.  API_KEY = "sk-abc123"   password = 'hunter2'   SECRET = "tok_live_..."
+        r'^\+.*\b(?:api_key|apikey|secret_key|secret|password|passwd|pwd|access_token'
+        r'|auth_token|private_key|client_secret|jwt_secret|db_password|database_password'
+        r'|smtp_password|stripe_secret|twilio_auth|sendgrid_key)\b'
+        r'\s*(?:=|:)\s*(?:"[^"]{6,}"|\x27[^\x27]{6,}\x27)',  # assigned a non-trivial literal
+
+        # Raw / f-string interpolated SQL — injectable query construction
+        # e.g.  f"SELECT * FROM users WHERE id = {user_id}"
+        #       "INSERT INTO logs VALUES ('" + data + "')"
+        r'^\+.*(?:SELECT|INSERT|UPDATE|DELETE|DROP|EXEC(?:UTE)?)'
+        r'.*(?:\{[^}]+\}|["\x27]\s*\+\s*\w|%s|%\(\w+\)s)',  # variable interpolation
+
+        # Hardcoded bearer / JWT tokens (look like real tokens, not placeholders)
+        r'^\+.*(?:Bearer|token)\s+[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}',
+    ]
     critical_security_flag = 0
-    if re.search(r'^\+.*(?:window\..*(?:apiKey|ANON_KEY|env)|@csrf\.exempt)', patch, re.MULTILINE | re.IGNORECASE):
-        critical_security_flag = 1
+    for _cpat in _critical_patterns:
+        if re.search(_cpat, patch, re.MULTILINE | re.IGNORECASE):
+            critical_security_flag = 1
+            break
+
     _pure_markup = {'.css', '.scss', '.sass', '.less', '.md', '.rst', '.txt',
                     '.yaml', '.yml', '.toml', '.ini', '.cfg', '.lock', '.svg'}
 
@@ -321,7 +386,6 @@ def extract_features(data: dict) -> dict:
         security_pattern_hits = 0
     elif _fname_ext_sec in ('.html', '.htm'):
         # HTML can contain dangerous JS — scan only for executable patterns
-        # specifically: credential exfil, eval, dangerous fetch/XHR patterns
         security_pattern_hits = len(re.findall(
             r'(JSON\.stringify\s*\(\s*\{[^}]*(password|passwd|pwd|username|user)[^}]*\}|'
             r'\beval\s*\(|'
@@ -332,7 +396,7 @@ def extract_features(data: dict) -> dict:
             r'localStorage\.setItem)',
             patch, re.IGNORECASE))
     else:
-        # Real code files — full scan
+        # Real code files — full scan (used for sub-score, not 100% trigger)
         security_pattern_hits = len(re.findall(
             r'\b(password|token|secret|api_key|private_key|auth|credential|sql|query|eval|exec)\b',
             patch, re.IGNORECASE))
@@ -451,11 +515,19 @@ def extract_features(data: dict) -> dict:
     }
 
     all_features = {**structured, **engineered}
+
+    # ── Sensitive-file detection ──────────────────────────────────────────
+    sensitive_files = [f for f in all_files if is_sensitive_file(f)]
+    if not sensitive_files and filename and is_sensitive_file(filename):
+        sensitive_files = [filename]
+
     all_features["_meta"] = {
-        "critical_file_names": critical_files,
-        "is_test_only":        is_test_only,
-        "all_files":           all_files,
+        "critical_file_names":    critical_files,
+        "sensitive_file_names":   sensitive_files,
+        "is_test_only":           is_test_only,
+        "all_files":              all_files,
         "critical_security_flag": critical_security_flag,
+        "description":            description,
     }
     return all_features
 

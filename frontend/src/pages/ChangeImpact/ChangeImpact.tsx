@@ -12,9 +12,22 @@ import {
   ChevronRight, Zap, GitBranch, ArrowRight, Brain,
   Waves, FunctionSquare, Shield, RefreshCw, Trash2,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { cn } from '@/lib/utils';
 import { truncateSha, formatRelativeTime } from '@/utils/formatters';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import { deleteChangeImpactScore } from '@/lib/firebaseService';
 import type { CRChangedFunction } from '@/types/coderippleTypes';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -108,6 +121,7 @@ function FunctionRow({ fn }: { fn: CRChangedFunction }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ChangeImpact() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [scores, setScores] = useState<FBRiskScore[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selected, setSelected] = useState<FBRiskScore | null>(null);
@@ -156,6 +170,18 @@ export default function ChangeImpact() {
       const cr = await analyzeAndStoreCR(user.id, selected.sha, selected.repoFullName);
       if (cr) await loadScores();
     } finally { setAnalyzing(null); }
+  };
+
+  const handleDeleteOne = async (sha: string, repoFullName: string) => {
+    if (!user) return;
+    try {
+      await deleteChangeImpactScore(user.id, repoFullName, sha);
+      setScores(prev => prev.filter(s => s.sha !== sha));
+      if (selected?.sha === sha) setSelected(null);
+      toast({ title: 'Record deleted' });
+    } catch (e: any) {
+      toast({ title: 'Delete failed', variant: 'destructive', description: e.message });
+    }
   };
 
   const handleWipeData = async () => {
@@ -251,44 +277,71 @@ export default function ChangeImpact() {
               <h2 className="text-lg font-semibold text-foreground">Analyzed Changes</h2>
               <div className="space-y-2 max-h-[700px] overflow-y-auto pr-1">
                 {filtered.map(score => (
-                  <button key={score.sha} onClick={() => { setSelected(score); setActiveTab('graph'); }}
-                    className={cn('w-full glass-card rounded-xl p-4 text-left transition-all hover:border-primary/30',
-                      selected?.sha === score.sha && 'ring-2 ring-primary border-primary/50')}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <Avatar className="h-7 w-7 shrink-0">
-                          <AvatarImage src={score.author_avatar} />
-                          <AvatarFallback>{score.author_name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <p className="font-medium text-foreground truncate text-sm">{score.message.split('\n')[0]}</p>
-                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
-                            <GitCommit className="h-3 w-3" />
-                            <span className="font-mono">{truncateSha(score.sha)}</span>
-                            <span>·</span>
-                            <span>{formatRelativeTime(score.committed_at)}</span>
+                  <div key={score.sha} className="group relative">
+                    <button onClick={() => { setSelected(score); setActiveTab('graph'); }}
+                      className={cn('w-full glass-card rounded-xl p-4 text-left transition-all hover:border-primary/30',
+                        selected?.sha === score.sha && 'ring-2 ring-primary border-primary/50')}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Avatar className="h-7 w-7 shrink-0">
+                            <AvatarImage src={score.author_avatar} />
+                            <AvatarFallback>{score.author_name.charAt(0)}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="font-medium text-foreground truncate text-sm">{score.message.split('\n')[0]}</p>
+                            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
+                              <GitCommit className="h-3 w-3" />
+                              <span className="font-mono">{truncateSha(score.sha)}</span>
+                              <span>·</span>
+                              <span>{formatRelativeTime(score.committed_at)}</span>
+                            </div>
                           </div>
                         </div>
+                        <RiskBadge score={score.cr_risk_score ?? score.overall_risk_score} size="sm" />
                       </div>
-                      <RiskBadge score={score.cr_risk_score ?? score.overall_risk_score} size="sm" />
+                      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                        {score.cr_analyzed && score.cr_change_type && (
+                          <span className={cn('text-[10px] px-2 py-0.5 rounded-full border font-semibold', changeTypeColor(score.cr_change_type))}>
+                            {changeTypeLabel(score.cr_change_type)}
+                          </span>
+                        )}
+                        {score.cr_analyzed && (score.cr_ripple_size ?? 0) > 0 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-warning/10 border border-warning/30 text-warning font-medium flex items-center gap-1">
+                            <Zap className="h-2.5 w-2.5" />{score.cr_ripple_size} nodes
+                          </span>
+                        )}
+                        {score.cr_analyzed
+                          ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 border border-primary/30 text-primary font-medium flex items-center gap-1"><Brain className="h-2.5 w-2.5" />CR</span>
+                          : <span className="text-[10px] text-muted-foreground">{score.files_changed} files · +{score.additions}</span>
+                        }
+                      </div>
+                    </button>
+                    
+                    {/* Delete button (visible on hover) */}
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <button className="p-1 rounded bg-background/80 text-muted-foreground hover:text-risk-high hover:bg-risk-high/10 border border-border/50">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Analysis?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will remove the Change Impact data for this commit from your history.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteOne(score.sha, score.repoFullName)} className="bg-risk-high hover:bg-risk-high/90 text-white">
+                              Confirm Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </div>
-                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                      {score.cr_analyzed && score.cr_change_type && (
-                        <span className={cn('text-[10px] px-2 py-0.5 rounded-full border font-semibold', changeTypeColor(score.cr_change_type))}>
-                          {changeTypeLabel(score.cr_change_type)}
-                        </span>
-                      )}
-                      {score.cr_analyzed && (score.cr_ripple_size ?? 0) > 0 && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-warning/10 border border-warning/30 text-warning font-medium flex items-center gap-1">
-                          <Zap className="h-2.5 w-2.5" />{score.cr_ripple_size} nodes
-                        </span>
-                      )}
-                      {score.cr_analyzed
-                        ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 border border-primary/30 text-primary font-medium flex items-center gap-1"><Brain className="h-2.5 w-2.5" />CR</span>
-                        : <span className="text-[10px] text-muted-foreground">{score.files_changed} files · +{score.additions}</span>
-                      }
-                    </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>

@@ -1,15 +1,26 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, GitCommit, Clock, FileCode, AlertCircle, Play, Loader2, ExternalLink } from 'lucide-react';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, GitCommit, Clock, FileCode, AlertCircle, Play, Loader2, ExternalLink, Trash2 } from 'lucide-react';
 import { MainLayout } from '@/components/layouts/MainLayout';
 import { getCommit, type GHCommit } from '@/lib/githubService';
 import { analyzeCommit, type RiskResult } from '@/lib/flaskService';
-import { upsertRiskScore, getRiskScore, type FBRiskScore } from '@/lib/firebaseService';
+import { upsertRiskScore, getRiskScore, deleteRiskScore, type FBRiskScore } from '@/lib/firebaseService';
 import { RiskBadge, RiskScoreBar } from '@/components/common/RiskBadge';
 import { RiskRadarChart } from '@/components/charts/RiskRadarChart';
 import { DependencyGraph } from '@/components/graphs/DependencyGraph';
 import { PageLoader } from '@/components/common/Loader';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { formatDate, truncateSha } from '@/utils/formatters';
@@ -21,6 +32,7 @@ export default function CommitDetails() {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const owner = searchParams.get('owner') ?? '';
   const repoName = searchParams.get('repo') ?? '';
@@ -30,6 +42,7 @@ export default function CommitDetails() {
   const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const activeRiskMetrics = useMemo(() => {
     if (!risk) return null;
@@ -140,6 +153,21 @@ export default function CommitDetails() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!user || !sha || !owner || !repoName) return;
+    setIsDeleting(true);
+    try {
+      await deleteRiskScore(user.id, `${owner}/${repoName}`, sha);
+      toast({ title: 'Analysis deleted' });
+      // Redirect back to repo details
+      navigate(`/repos/${encodeURIComponent(`${owner}/${repoName}`)}`);
+    } catch (e: any) {
+      toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   if (isLoading) return <MainLayout><PageLoader /></MainLayout>;
 
   const message = commit?.commit.message ?? sha ?? '';
@@ -197,6 +225,30 @@ export default function CommitDetails() {
                 <Button onClick={handleAnalyze} disabled={isAnalyzing || !commit} variant={risk ? 'outline' : 'default'} className="gap-2">
                   {isAnalyzing ? <><Loader2 className="h-4 w-4 animate-spin" />{risk ? 'Re-running…' : 'Analyzing…'}</> : <><Play className="h-4 w-4" />{risk ? 'Re-run Analysis' : 'Analyze Commit'}</>}
                 </Button>
+                
+                {risk && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-risk-high hover:bg-risk-high/10" disabled={isDeleting}>
+                         <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Analysis?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently remove the risk scores and AI insights for this commit. You can re-analyze it later if needed.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDelete} className="bg-risk-high hover:bg-risk-high/90 text-white">
+                          Confirm Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </div>
             </div>
           </div>

@@ -7,7 +7,7 @@ const BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000/api';
 
 export interface FileRiskResult {
   file: string;
-  patch: string;
+  patch?: string;
   risk_score: number;
   risk_label: string;
   correctness_risk: number;
@@ -125,6 +125,15 @@ export async function getCachedRisk(sha: string): Promise<RiskResult | null> {
     return mapped;
   } catch {
     return null;
+  }
+}
+
+export async function deleteCachedRisk(sha: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/commit/${sha}/risk`, { method: 'DELETE' });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 

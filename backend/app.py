@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from feature_extractor import extract_features, features_to_vector, ALL_FEATURE_COLS, is_generated_file
+from feature_extractor import extract_features, features_to_vector, ALL_FEATURE_COLS, is_generated_file, is_sensitive_file
 from risk_reasoning import generate_risk_reasons, derive_risk_categories
 
 # ── Try loading model; gracefully fall back to heuristic mode ─────────────
@@ -110,6 +110,34 @@ def _is_trivial_commit(features: dict) -> tuple[bool, str]:
     return False, ""
 
 
+def _is_initial_commit(features: dict) -> bool:
+    """
+    Returns True when this looks like a repository's first commit.
+    Heuristic: commit message matches common initial-commit phrases,
+    OR every file is a pure addition (no removals at all) with no
+    pre-existing code — i.e. nothing was deleted or modified.
+    """
+    import re as _re
+    description = features.get("_meta", {}).get("description", "").strip().lower()
+    _initial_patterns = [
+        r'^initial commit',
+        r'^first commit',
+        r'^init(?:ial)?\b',
+        r'^initial$',
+        r'^project init',
+        r'^repo init',
+        r'^initial push',
+        r'^initial version',
+        r'^initial setup',
+        r'^initial upload',
+        r'\binitial commit\b',
+    ]
+    for pat in _initial_patterns:
+        if _re.search(pat, description):
+            return True
+    return False
+
+
 def _has_critical_signals(features: dict) -> bool:
     return (
         features.get("security_pattern_hits",  0) >= 3  or
@@ -125,16 +153,31 @@ def _has_critical_signals(features: dict) -> bool:
 
 def run_prediction(features: dict) -> dict:
     meta = features.get("_meta", {})
-    if meta.get("critical_security_flag", 0) > 0:
+
+    # ── 1. Sensitive-file / hardcoded-secret override (always wins) ───────
+    if meta.get("critical_security_flag", 0) > 0 or meta.get("sensitive_file_names"):
         return {
             "pred_risk_score": 1.0,
             "pred_risk_label": "CRITICAL RISK",
             "pred_confidence": 0.99,
             "probabilities": {"HIGH RISK": 0.99, "MEDIUM RISK": 0.01, "LOW RISK": 0.00},
             "mode": "rule:critical_security",
-            "override_reason": "CRITICAL: Exposed API keys or disabled security middleware (@csrf.exempt) detected",
+            "override_reason": "CRITICAL: Hardcoded secret, API key, password, SQL injection, "
+                               "or sensitive file detected",
         }
 
+    # ── 2. Initial commit ────────────────────────────────────────────────
+    if _is_initial_commit(features):
+        return {
+            "pred_risk_score": 0.08,
+            "pred_risk_label": "LOW RISK",
+            "pred_confidence": 0.95,
+            "probabilities": {"HIGH RISK": 0.01, "MEDIUM RISK": 0.04, "LOW RISK": 0.95},
+            "mode": "rule:initial_commit",
+            "override_reason": "Initial commit — no prior codebase to regress against",
+        }
+
+    # ── 3. Trivial commit ─────────────────────────────────────────────────
     trivial, trivial_reason = _is_trivial_commit(features)
     if trivial:
         return {
@@ -182,6 +225,7 @@ def run_prediction(features: dict) -> dict:
         model_result["mode"] = "model+rule:upgrade"
 
     return model_result
+
 
 
 # ─────────────────────────────────────────────
@@ -335,17 +379,34 @@ def analyze_batch():
             file_categories = derive_risk_categories(features)
             file_reasons    = generate_risk_reasons(features, pred["pred_risk_label"], pred["pred_risk_score"])
             all_features.append(features)
+
+            # -- Sensitive file override: force security 100% for this file --
+            file_is_sensitive = is_sensitive_file(filename)
+            if file_is_sensitive:
+                file_sec_risk  = 1.0
+                file_risk_score = 1.0
+                file_risk_label = "CRITICAL RISK"
+                file_sec_reasons = [
+                    f"CRITICAL: Sensitive file committed ({filename}) "
+                    "— credentials or secret keys may be exposed"
+                ]
+            else:
+                file_sec_risk   = file_categories.get("security", 0)
+                file_risk_score = pred["pred_risk_score"]
+                file_risk_label = pred["pred_risk_label"]
+                file_sec_reasons = file_categories.get("security_reasons", [])
+
             results.append({
                 "file":                    filename,
                 "patch":                   patch,
-                "risk_score":              pred["pred_risk_score"],
-                "risk_label":              pred["pred_risk_label"],
+                "risk_score":              file_risk_score,
+                "risk_label":              file_risk_label,
                 "correctness_risk":        file_categories.get("correctness", 0),
-                "security_risk":           file_categories.get("security", 0),
+                "security_risk":           file_sec_risk,
                 "maintainability_risk":    file_categories.get("maintainability", 0),
                 "integration_risk":        file_categories.get("integration", 0),
                 "correctness_reasons":     file_categories.get("correctness_reasons", []),
-                "security_reasons":        file_categories.get("security_reasons", []),
+                "security_reasons":        file_sec_reasons,
                 "maintainability_reasons": file_categories.get("maintainability_reasons", []),
                 "integration_reasons":     file_categories.get("integration_reasons", []),
                 "risk_reasons":            file_reasons,
@@ -408,21 +469,25 @@ def analyze_batch():
     })
 
 
-@app.route("/api/commit/<sha>/risk", methods=["GET"])
-def get_cached_risk(sha: str):
-    """Returns cached risk result if available. 404 = not yet analyzed (normal)."""
-    cached = _risk_cache.get(sha)
-    if cached:
-        return jsonify(cached)
-    return error_response("Not analyzed yet", 404)
+@app.route("/api/commit/<sha>/risk", methods=["GET", "DELETE", "POST"])
+def manage_risk_cache(sha: str):
+    """GET = get cache, POST = store cache, DELETE = clear cache."""
+    if request.method == "GET":
+        cached = _risk_cache.get(sha)
+        if cached:
+            return jsonify(cached)
+        return error_response("Not analyzed yet", 404)
 
+    if request.method == "DELETE":
+        if sha in _risk_cache:
+            del _risk_cache[sha]
+            return jsonify({"status": "deleted"})
+        return error_response("Not found in cache", 404)
 
-@app.route("/api/commit/<sha>/risk", methods=["POST"])
-def store_risk(sha: str):
-    """Cache a risk result sent from the frontend after analysis."""
-    body = request.get_json(silent=True) or {}
-    _risk_cache[sha] = {**body, "sha": sha}
-    return jsonify({"status": "cached"})
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        _risk_cache[sha] = {**body, "sha": sha}
+        return jsonify({"status": "cached"})
 
 
 # ─────────────────────────────────────────────
