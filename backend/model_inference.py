@@ -22,6 +22,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import gdown
 
 MODEL_PATH  = os.path.join(os.path.dirname(__file__), "models", "best_model.pt")
 SCALER_PATH = os.path.join(os.path.dirname(__file__), "models", "scalar_features.pkl")
@@ -30,9 +31,9 @@ LABEL_CLASSES = ["HIGH RISK", "LOW RISK", "MEDIUM RISK"]  # alphabetical — mat
 DEVICE = torch.device("cpu")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # Architecture (mirrors code_risk_analyzer.ipynb exactly)
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 class StructuredEncoder(nn.Module):
     def __init__(self, input_dim: int, output_dim: int = 128, dropout: float = 0.3):
@@ -112,9 +113,9 @@ class HybridCodeRiskModel(nn.Module):
         return risk_score, risk_logits
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # Singleton loader
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 _model  = None
 _scaler = None
@@ -131,7 +132,26 @@ def _load_artifacts():
     if _model is not None:
         return _model, _scaler
 
-    # ── Load scaler ───────────────────────────────────────────────────────
+    # --- Download model from Google Drive if missing ---
+    if not os.path.exists(MODEL_PATH):
+        logging.info(f"Model not found at {MODEL_PATH}. Downloading from Google Drive...")
+        
+        # Ensure the models directory exists
+        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        
+        # TODO: REPLACE WITH YOUR ACTUAL GOOGLE DRIVE FILE ID
+        FILE_ID = "1b_9A9alyH4uOiYQ5eXcijGisSAPss0T1"
+        
+        try:
+            # gdown automatically handles the Google Drive virus scan warning for large files
+            gdown.download(id=FILE_ID, output=MODEL_PATH, quiet=False)
+            logging.info("Download complete!")
+        except Exception as e:
+            logging.error(f"Failed to download model from Google Drive: {e}")
+            _model_failed = True
+            raise RuntimeError(f"Failed to download model: {e}")
+
+    #  Load scaler 
     with open(SCALER_PATH, "rb") as f:
         raw_scaler = pickle.load(f)
 
@@ -182,7 +202,7 @@ def _load_artifacts():
 
     logging.info(f"Scaler ready — n_features={_n_structured}")
 
-    # ── Load checkpoint ───────────────────────────────────────────────────
+    #  Load checkpoint 
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
 
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
@@ -196,7 +216,7 @@ def _load_artifacts():
     prefixes = sorted(set(k.split(".")[0] for k in state_dict.keys()))
     logging.info(f"State dict key prefixes: {prefixes}")
 
-    # ── Infer struct_encoder dims by scanning all struct keys ────────────
+    #  Infer struct_encoder dims by scanning all struct keys 
     struct_linear_keys = sorted([
         k for k in state_dict
         if k.startswith("struct_encoder.net.") and k.endswith(".weight")
@@ -230,7 +250,7 @@ def _load_artifacts():
         logging.warning(f"Scaler has {_n_structured} features but model expects {n_struct_in}")
         _n_structured = n_struct_in
 
-    # ── Build model and load weights ──────────────────────────────────────
+    #  Build model and load weights 
     _model = HybridCodeRiskModel(
         n_structured = n_struct_in,
         num_classes  = 3,

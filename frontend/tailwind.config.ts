@@ -55,7 +55,6 @@ export default {
         "risk-low": "hsl(var(--risk-low))",
         "risk-medium": "hsl(var(--risk-medium))",
         "risk-high": "hsl(var(--risk-high))",
-        "risk-critical": "hsl(var(--risk-critical))",
         // Semantic colors
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",

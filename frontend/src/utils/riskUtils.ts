@@ -1,7 +1,6 @@
 import { RISK_THRESHOLDS, type RiskLevel } from './constants';
 
 export function getRiskLevel(score: number): RiskLevel {
-  if (score >= RISK_THRESHOLDS.CRITICAL) return 'CRITICAL';
   if (score >= RISK_THRESHOLDS.HIGH) return 'HIGH';
   if (score >= RISK_THRESHOLDS.MEDIUM) return 'MEDIUM';
   return 'LOW';
@@ -12,7 +11,6 @@ export function getRiskColor(level: RiskLevel): string {
     LOW: 'risk-low',
     MEDIUM: 'risk-medium',
     HIGH: 'risk-high',
-    CRITICAL: 'risk-critical',
   };
   return colors[level];
 }
@@ -22,7 +20,6 @@ export function getRiskBadgeClass(level: RiskLevel): string {
     LOW: 'risk-badge-low',
     MEDIUM: 'risk-badge-medium',
     HIGH: 'risk-badge-high',
-    CRITICAL: 'risk-badge-critical',
   };
   return classes[level];
 }
@@ -58,7 +55,6 @@ export function getRiskDescription(level: RiskLevel): string {
     LOW: 'This change appears safe with minimal risk factors.',
     MEDIUM: 'Some risk factors detected. Review recommended.',
     HIGH: 'Significant risk detected. Careful review required.',
-    CRITICAL: 'Critical risk level. Immediate attention needed.',
   };
   return descriptions[level];
 }
@@ -66,7 +62,6 @@ export function getRiskDescription(level: RiskLevel): string {
 export function riskLabelToLevel(label: string): RiskLevel {
   if (!label) return 'LOW';
   const upper = label.toUpperCase();
-  if (upper.includes('CRITICAL')) return 'CRITICAL';
   if (upper.includes('HIGH'))     return 'HIGH';
   if (upper.includes('MEDIUM'))   return 'MEDIUM';
   return 'LOW';

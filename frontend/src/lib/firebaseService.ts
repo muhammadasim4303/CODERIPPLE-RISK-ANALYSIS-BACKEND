@@ -358,7 +358,7 @@ export interface DashboardStats {
   medium_risk_commits: number;
   low_risk_commits: number;
   average_risk_score: number;
-  risk_distribution: { low: number; medium: number; high: number; critical: number };
+  risk_distribution: { low: number; medium: number; high: number };
   risk_trend: Array<{ date: string; average_risk: number; commit_count: number }>;
   top_risky_repos: Array<{ repo_name: string; full_name: string; average_risk: number; high_risk_count: number }>;
 }
@@ -415,7 +415,7 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
     medium_risk_commits: medium,
     low_risk_commits: low,
     average_risk_score: avgRisk,
-    risk_distribution: { low, medium, high, critical: 0 },
+    risk_distribution: { low, medium, high },
     risk_trend,
     top_risky_repos,
   };

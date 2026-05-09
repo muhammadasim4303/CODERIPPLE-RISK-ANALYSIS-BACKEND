@@ -18,6 +18,8 @@ import RiskOverview from "./pages/RiskAnalysis/RiskOverview";
 import Settings from "./pages/Settings/Settings";
 import NotFound from "./pages/NotFound";
 import Homepage from "./pages/Homepage/Homepage";
+import AcceptInvite from "./pages/Repositories/AcceptInvite";
+
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,6 +51,7 @@ const App = () => (
                 <Route path="/repos" element={<RepoList />} />
                 {/* repoId is encoded "owner/repo" */}
                 <Route path="/repos/:repoId" element={<RepoDetails />} />
+                <Route path="/accept-invite" element={<AcceptInvite />} />
                 {/* sha with optional owner/repo query params */}
                 <Route path="/commits/:sha" element={<CommitDetails />} />
                 <Route path="/change-impact" element={<ChangeImpact />} />

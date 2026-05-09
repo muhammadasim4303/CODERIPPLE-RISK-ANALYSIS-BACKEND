@@ -12,9 +12,9 @@ import numpy as np
 from difflib import SequenceMatcher
 
 
-# ─────────────────────────────────────────────
+# 
 # Helpers
-# ─────────────────────────────────────────────
+# 
 
 def normalize_code(code) -> str:
     if code is None:
@@ -138,9 +138,9 @@ def detect_test_only_change(patch: str) -> bool:
     return all(is_test_file(f) for f in all_files)
 
 
-# ─────────────────────────────────────────────
+# 
 # Reconstruct old/new code from a unified diff
-# ─────────────────────────────────────────────
+# 
 
 def reconstruct_from_patch(patch: str):
     """
@@ -191,19 +191,23 @@ def analyze_time_complexity(code: str) -> int:
     if not code.strip():
         return 1
     score = 1
+    # Simple nesting depth check
     lines = code.split("\n")
-    indent_levels = []
+    max_nesting = 0
+    current_nesting = 0
     for line in lines:
-        indent = len(line) - len(line.lstrip())
-        indent_levels.append(indent)
+        stripped = line.strip()
+        if not stripped: continue
+        # Crude brace-based nesting
+        current_nesting += stripped.count("{") - stripped.count("}")
+        max_nesting = max(max_nesting, current_nesting)
+        
+        # Penalize loops
         if any(k in line for k in ['for', 'while', 'forEach', 'map', 'filter']):
-            nesting = sum(1 for i in indent_levels if i < indent) // 4
-            score = max(score, nesting + 1)
-    if len(re.findall(r'\b\w+\s*\([^)]*\)', code)) > 0:
-        score = max(score, 3)
-    if any(k in code for k in ['.sort(', 'sorted(', 'Arrays.sort', 'Collections.sort']):
-        score = max(score, 2)
-    return score
+            score += 1
+            
+    # Cap score realistically
+    return min(5, score + (max_nesting // 2))
 
 
 def code_similarity(old_code: str, new_code: str) -> float:
@@ -216,9 +220,9 @@ def code_similarity(old_code: str, new_code: str) -> float:
     return SequenceMatcher(None, old[:3000], new[:3000]).ratio()
 
 
-# ─────────────────────────────────────────────
+# 
 # Main extraction
-# ─────────────────────────────────────────────
+# 
 
 def extract_features(data: dict) -> dict:
     patch        = normalize_code(data.get("patch", ""))
@@ -227,7 +231,7 @@ def extract_features(data: dict) -> dict:
     filename     = data.get("file", "")
     description  = data.get("description", data.get("messages", ""))
 
-    # ── Short-circuit: generated/compiled/lock files → zero all signals ───
+    #  Short-circuit: generated/compiled/lock files → zero all signals 
     if is_generated_file(filename):
         import math as _math
         added_lines   = len(re.findall(r'^\+(?!\+)', patch, flags=re.MULTILINE))
@@ -269,7 +273,7 @@ def extract_features(data: dict) -> dict:
         }
         return zero
 
-    # ── If old/new contents are missing, reconstruct from patch ──────────
+    #  If old/new contents are missing, reconstruct from patch 
     if (not old_code.strip() or not new_code.strip()) and patch.strip():
         reconstructed_old, reconstructed_new = reconstruct_from_patch(patch)
         if not old_code.strip():
@@ -277,15 +281,15 @@ def extract_features(data: dict) -> dict:
         if not new_code.strip():
             new_code = reconstructed_new
 
-    # ── Test-only detection ──────────────────────────────────────────────
+    #  Test-only detection 
     is_test_only = detect_test_only_change(patch)
 
-    # ── Basic line counts ────────────────────────────────────────────────
+    #  Basic line counts 
     added_lines   = len(re.findall(r'^\+(?!\+)', patch, flags=re.MULTILINE))
     removed_lines = len(re.findall(r'^-(?!-)',   patch, flags=re.MULTILINE))
     diff_size     = added_lines + removed_lines
 
-    # ── File breakdown ───────────────────────────────────────────────────
+    #  File breakdown 
     all_files = re.findall(r'diff --git a/(.*?) b/', patch)
     if not all_files and filename:
         all_files = [filename]
@@ -299,7 +303,7 @@ def extract_features(data: dict) -> dict:
     critical_files_count = len(critical_files)
     test_files_modified  = int(len(test_files) > 0)
 
-    # ── Cyclomatic complexity (now uses reconstructed code) ──────────────
+    #  Cyclomatic complexity (now uses reconstructed code) 
     old_cyclomatic = calculate_cyclomatic_complexity(old_code)
     new_cyclomatic = calculate_cyclomatic_complexity(new_code)
     cyc_delta      = new_cyclomatic - old_cyclomatic
@@ -308,7 +312,7 @@ def extract_features(data: dict) -> dict:
     new_time   = analyze_time_complexity(new_code)
     time_delta = new_time - old_time
 
-    # ── Complexity keywords in patch ─────────────────────────────────────
+    #  Complexity keywords in patch 
     if not is_test_only:
         complexity_hits  = len(re.findall(
             r'\b(if|for|while|try|catch|except|switch|case)\b', patch, re.IGNORECASE))
@@ -319,22 +323,22 @@ def extract_features(data: dict) -> dict:
 
     cyclomatic_delta = branches_added - branches_removed
 
-    # ── Comments ─────────────────────────────────────────────────────────
+    #  Comments 
     comment_before = len(re.findall(r'^-\s*(#|//|/\*|\*)', patch, re.MULTILINE))
     comment_after  = len(re.findall(r'^\+\s*(#|//|/\*|\*)', patch, re.MULTILINE))
     comment_delta  = comment_after - comment_before
 
-    # ── Imports / dependencies ────────────────────────────────────────────
+    #  Imports / dependencies 
     import_added       = len(re.findall(r'^\+.*\b(import|require|include|using)\b', patch, re.MULTILINE))
     import_removed     = len(re.findall(r'^-.*\b(import|require|include|using)\b',  patch, re.MULTILINE))
     dependency_changes = import_added + import_removed
 
-    # ── Exception handling ────────────────────────────────────────────────
+    #  Exception handling 
     exception_added   = len(re.findall(r'^\+.*(try|catch|except|finally|raise|throw)', patch, re.MULTILINE))
     exception_removed = len(re.findall(r'^-.*(try|catch|except|finally|raise|throw)',  patch, re.MULTILINE))
     exception_changes = exception_added + exception_removed
 
-    # ── Public API ────────────────────────────────────────────────────────
+    #  Public API 
     # Only meaningful for actual code files — skip markup/style/config
     _markup_exts = {'.html', '.htm', '.css', '.scss', '.sass', '.less',
                     '.md', '.rst', '.txt', '.xml', '.svg', '.json',
@@ -349,28 +353,28 @@ def extract_features(data: dict) -> dict:
 
     public_api_modified = int(public_api_added > 0 or public_api_removed > 0)
 
-    # ── Security patterns ─────────────────────────────────────────────────
+    #  Security patterns 
     _fname_ext_sec = ('.' + filename.lower().rsplit('.', 1)[-1]) if '.' in filename else ''
 
-    # ── Critical security flag: 100% score triggers ───────────────────────
+    #  Critical security flag: 100% score triggers 
     # Only fires when genuinely dangerous secrets are hardcoded or SQL injection
     # patterns are present. NOT triggered by comment mentions or variable names.
     _critical_patterns = [
         # Hardcoded secrets assigned in code
         # e.g.  API_KEY = "sk-abc123"   password = 'hunter2'   SECRET = "tok_live_..."
-        r'^\+.*\b(?:api_key|apikey|secret_key|secret|password|passwd|pwd|access_token'
+        # We ensure it's an assignment (+... = "string") and exclude regex definitions
+        r'^\+\s*(?!(?:r|f)?[\x27"])\b(?:api_key|apikey|secret_key|secret|password|passwd|pwd|access_token'
         r'|auth_token|private_key|client_secret|jwt_secret|db_password|database_password'
         r'|smtp_password|stripe_secret|twilio_auth|sendgrid_key)\b'
-        r'\s*(?:=|:)\s*(?:"[^"]{6,}"|\x27[^\x27]{6,}\x27)',  # assigned a non-trivial literal
+        r'\s*(?:=|:)\s*(?:"[^"]{8,}"|\x27[^\x27]{8,}\x27)',  # assigned a non-trivial literal
 
         # Raw / f-string interpolated SQL — injectable query construction
         # e.g.  f"SELECT * FROM users WHERE id = {user_id}"
-        #       "INSERT INTO logs VALUES ('" + data + "')"
-        r'^\+.*(?:SELECT|INSERT|UPDATE|DELETE|DROP|EXEC(?:UTE)?)'
-        r'.*(?:\{[^}]+\}|["\x27]\s*\+\s*\w|%s|%\(\w+\)s)',  # variable interpolation
+        r'^\+\s*(?!(?:r|f)?[\x27"]).*(?:SELECT|INSERT|UPDATE|DELETE|DROP|EXEC(?:UTE)?)'
+        r'\s+.*(?:\{[^}]+\}|["\x27]\s*\+\s*\w|%s|%\(\w+\)s)',  # variable interpolation
 
         # Hardcoded bearer / JWT tokens (look like real tokens, not placeholders)
-        r'^\+.*(?:Bearer|token)\s+[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}',
+        r'^\+\s*(?!(?:r|f)?[\x27"]).*(?:Bearer|token)\s+[A-Za-z0-9\-_]{25,}\.[A-Za-z0-9\-_]{25,}',
     ]
     critical_security_flag = 0
     for _cpat in _critical_patterns:
@@ -401,13 +405,13 @@ def extract_features(data: dict) -> dict:
             r'\b(password|token|secret|api_key|private_key|auth|credential|sql|query|eval|exec)\b',
             patch, re.IGNORECASE))
 
-    # ── Structure changes ─────────────────────────────────────────────────
+    #  Structure changes 
     structure_changes = (
         len(re.findall(r'^\+\s*[\{\}\[\]\(\)]', patch, re.MULTILINE)) +
         len(re.findall(r'^-\s*[\{\}\[\]\(\)]',  patch, re.MULTILINE))
     )
 
-    # ── Indentation depth ─────────────────────────────────────────────────
+    #  Indentation depth 
     max_indent_added = max_indent_removed = 0
     for line in patch.split('\n'):
         if line.startswith('+'):
@@ -420,12 +424,12 @@ def extract_features(data: dict) -> dict:
                 max_indent_removed = max(max_indent_removed, len(m.group(1)))
     depth_change = max_indent_added - max_indent_removed
 
-    # ── Code similarity (now meaningful with reconstructed code) ──────────
+    #  Code similarity (now meaningful with reconstructed code) 
     sim = code_similarity(old_code, new_code)
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # STRUCTURED_COLS
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     structured = {
         "is_test_only":                int(is_test_only),
         "test_files_count":            test_files_count,
@@ -464,11 +468,13 @@ def extract_features(data: dict) -> dict:
         "new_time_complexity":         new_time,
         "time_complexity_delta":       time_delta,
         "code_similarity":             sim,
+        "api_method_added":            len(re.findall(r'^\+.*methods=\[.*(GET|POST|PUT|DELETE|PATCH)', patch, re.MULTILINE | re.IGNORECASE)),
+        "api_method_removed":          len(re.findall(r'^-.*methods=\[.*(GET|POST|PUT|DELETE|PATCH)', patch, re.MULTILINE | re.IGNORECASE)),
     }
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # ENGINEERED_COLS
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     eps = 1e-6
     change_ratio            = added_lines / (removed_lines + eps)
     churn                   = added_lines + removed_lines
@@ -512,11 +518,12 @@ def extract_features(data: dict) -> dict:
         "log_removed_lines":       log_removed_lines,
         "log_diff_size":           log_diff_size,
         "log_churn":               log_churn,
+        "api_method_change_total": structured.get("api_method_added", 0) + structured.get("api_method_removed", 0),
     }
 
     all_features = {**structured, **engineered}
 
-    # ── Sensitive-file detection ──────────────────────────────────────────
+    #  Sensitive-file detection 
     sensitive_files = [f for f in all_files if is_sensitive_file(f)]
     if not sensitive_files and filename and is_sensitive_file(filename):
         sensitive_files = [filename]
@@ -532,9 +539,9 @@ def extract_features(data: dict) -> dict:
     return all_features
 
 
-# ─────────────────────────────────────────────
+# 
 # Feature column order (must match scaler training order)
-# ─────────────────────────────────────────────
+# 
 
 STRUCTURED_COLS = [
     'is_test_only', 'test_files_count', 'prod_files_count', 'critical_files_count',
@@ -550,7 +557,7 @@ STRUCTURED_COLS = [
     'old_cyclomatic_complexity', 'new_cyclomatic_complexity',
     'cyclomatic_complexity_delta',
     'old_time_complexity', 'new_time_complexity', 'time_complexity_delta',
-    'code_similarity',
+    'code_similarity', 'api_method_added', 'api_method_removed',
 ]
 
 ENGINEERED_COLS = [
@@ -559,6 +566,7 @@ ENGINEERED_COLS = [
     'import_net', 'has_new_deps', 'test_coverage_ratio', 'no_test_coverage',
     'code_dissimilarity', 'structural_risk',
     'log_added_lines', 'log_removed_lines', 'log_diff_size', 'log_churn',
+    'api_method_change_total',
 ]
 
 ALL_FEATURE_COLS = STRUCTURED_COLS + ENGINEERED_COLS

@@ -36,7 +36,6 @@ export function RiskBadge({ score, level, showScore = false, size = 'md', classN
         <span
           className={cn(
             'absolute inline-flex h-full w-full animate-ping rounded-full opacity-75',
-            riskLevel === 'CRITICAL' && 'bg-risk-critical',
             riskLevel === 'HIGH' && 'bg-risk-high',
             riskLevel === 'MEDIUM' && 'bg-risk-medium',
             riskLevel === 'LOW' && 'bg-risk-low'
@@ -45,7 +44,6 @@ export function RiskBadge({ score, level, showScore = false, size = 'md', classN
         <span
           className={cn(
             'relative inline-flex h-2 w-2 rounded-full',
-            riskLevel === 'CRITICAL' && 'bg-risk-critical',
             riskLevel === 'HIGH' && 'bg-risk-high',
             riskLevel === 'MEDIUM' && 'bg-risk-medium',
             riskLevel === 'LOW' && 'bg-risk-low'
@@ -79,7 +77,6 @@ export function RiskScoreBar({ score, label, showPercentage = true, className }:
           {showPercentage && (
             <span className={cn(
               'font-mono font-medium',
-              riskLevel === 'CRITICAL' && 'text-risk-critical',
               riskLevel === 'HIGH' && 'text-risk-high',
               riskLevel === 'MEDIUM' && 'text-risk-medium',
               riskLevel === 'LOW' && 'text-risk-low'
@@ -93,7 +90,6 @@ export function RiskScoreBar({ score, label, showPercentage = true, className }:
         <div
           className={cn(
             'h-full rounded-full transition-all duration-500 ease-out',
-            riskLevel === 'CRITICAL' && 'bg-risk-critical',
             riskLevel === 'HIGH' && 'bg-risk-high',
             riskLevel === 'MEDIUM' && 'bg-risk-medium',
             riskLevel === 'LOW' && 'bg-risk-low'

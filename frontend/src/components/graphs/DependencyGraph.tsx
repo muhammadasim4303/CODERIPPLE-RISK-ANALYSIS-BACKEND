@@ -136,7 +136,7 @@ export function DependencyGraph({ data, className }: DependencyGraphProps) {
         color: 'hsl(220, 20%, 40%)',
       },
       labelStyle: { fill: 'hsl(215, 15%, 55%)', fontSize: 10 },
-      labelBgStyle: { fill: 'hsl(222, 40%, 8%)', fillOpacity: 0.8 },
+      labelBgStyle: { fill: 'hsla(223, 44%, 11%, 0.86)', fillOpacity: 0.8 },
     }));
 
     // Apply layout

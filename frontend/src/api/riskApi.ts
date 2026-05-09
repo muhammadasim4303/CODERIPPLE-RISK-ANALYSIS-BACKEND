@@ -43,7 +43,6 @@ export interface DashboardSummary {
     low: number;
     medium: number;
     high: number;
-    critical: number;
   };
   risk_trend: Array<{
     date: string;

@@ -16,7 +16,7 @@ const EMPTY_STATS: DashboardStats = {
   medium_risk_commits: 0,
   low_risk_commits: 0,
   average_risk_score: 0,
-  risk_distribution: { low: 0, medium: 0, high: 0, critical: 0 },
+  risk_distribution: { low: 0, medium: 0, high: 0 },
   risk_trend: [],
   top_risky_repos: [],
 };

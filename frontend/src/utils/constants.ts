@@ -3,7 +3,6 @@ export const RISK_LEVELS = {
   LOW: 'LOW',
   MEDIUM: 'MEDIUM',
   HIGH: 'HIGH',
-  CRITICAL: 'CRITICAL',
 } as const;
 
 export type RiskLevel = keyof typeof RISK_LEVELS;
@@ -13,7 +12,6 @@ export const RISK_THRESHOLDS = {
   LOW: 0.3,
   MEDIUM: 0.5,
   HIGH: 0.7,
-  CRITICAL: 0.9,
 };
 
 // API Base URL (placeholder for backend integration)

@@ -1,0 +1,15 @@
+{
+  "name": "coderipple-cypress",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "open": "npx cypress open",
+    "run": "npx cypress run",
+    "run:headed": "npx cypress run --headed --browser chrome"
+  },
+  "devDependencies": {
+    "cypress": "^14.5.4",
+    "typescript": "^5.8.3"
+  }
+}

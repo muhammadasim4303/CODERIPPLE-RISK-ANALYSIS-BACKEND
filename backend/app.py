@@ -9,11 +9,19 @@ from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from dotenv import load_dotenv
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# Load from frontend .env to get GOOGLE_APP_PASSWORD
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "frontend", ".env"))
 
 from feature_extractor import extract_features, features_to_vector, ALL_FEATURE_COLS, is_generated_file, is_sensitive_file
 from risk_reasoning import generate_risk_reasons, derive_risk_categories
 
-# ── Try loading model; gracefully fall back to heuristic mode ─────────────
+#  Try loading model; gracefully fall back to heuristic mode 
 try:
     from model_inference import predict as model_predict, is_model_available
     MODEL_AVAILABLE = is_model_available()
@@ -29,9 +37,9 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
-# ─────────────────────────────────────────────
+# 
 # Helpers
-# ─────────────────────────────────────────────
+# 
 
 def error_response(message: str, status: int = 400):
     return jsonify({"error": message}), status
@@ -154,19 +162,19 @@ def _has_critical_signals(features: dict) -> bool:
 def run_prediction(features: dict) -> dict:
     meta = features.get("_meta", {})
 
-    # ── 1. Sensitive-file / hardcoded-secret override (always wins) ───────
+    #  1. Sensitive-file / hardcoded-secret override (always wins) 
     if meta.get("critical_security_flag", 0) > 0 or meta.get("sensitive_file_names"):
         return {
             "pred_risk_score": 1.0,
-            "pred_risk_label": "CRITICAL RISK",
+            "pred_risk_label": "HIGH RISK",
             "pred_confidence": 0.99,
             "probabilities": {"HIGH RISK": 0.99, "MEDIUM RISK": 0.01, "LOW RISK": 0.00},
             "mode": "rule:critical_security",
-            "override_reason": "CRITICAL: Hardcoded secret, API key, password, SQL injection, "
+            "override_reason": "HIGH: Hardcoded secret, API key, password, SQL injection, "
                                "or sensitive file detected",
         }
 
-    # ── 2. Initial commit ────────────────────────────────────────────────
+    #  2. Initial commit 
     if _is_initial_commit(features):
         return {
             "pred_risk_score": 0.08,
@@ -177,7 +185,7 @@ def run_prediction(features: dict) -> dict:
             "override_reason": "Initial commit — no prior codebase to regress against",
         }
 
-    # ── 3. Trivial commit ─────────────────────────────────────────────────
+    #  3. Trivial commit 
     trivial, trivial_reason = _is_trivial_commit(features)
     if trivial:
         return {
@@ -228,15 +236,15 @@ def run_prediction(features: dict) -> dict:
 
 
 
-# ─────────────────────────────────────────────
+# 
 # Simple in-memory cache
-# ─────────────────────────────────────────────
+# 
 _risk_cache: dict = {}
 
 
-# ─────────────────────────────────────────────
+# 
 # Routes
-# ─────────────────────────────────────────────
+# 
 
 @app.route("/api/health", methods=["GET"])
 def health():
@@ -245,6 +253,113 @@ def health():
         "model_loaded": MODEL_AVAILABLE,
         "timestamp":    datetime.now(timezone.utc).isoformat(),
     })
+
+
+@app.route("/api/send-invite", methods=["POST"])
+def send_invite():
+    body = request.get_json(silent=True)
+    if not body:
+        return error_response("Request body must be JSON")
+    
+    repo_name = body.get("repo_name")
+    invite_links = body.get("invite_links", {}) 
+    
+    if not repo_name or not invite_links:
+        return error_response("Missing repo_name or invite_links")
+        
+    sender_email = "muhammadasim4303@gmail.com"
+    app_password = os.environ.get("GOOGLE_APP_PASSWORD", "").strip()
+    # Strip quotes if they were included in the env file
+    if app_password.startswith('"') and app_password.endswith('"'):
+        app_password = app_password[1:-1]
+    
+    if not app_password:
+        return error_response("Missing GOOGLE_APP_PASSWORD in frontend .env", 500)
+        
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(sender_email, app_password)
+        
+        for email_addr, link in invite_links.items():
+            msg = MIMEMultipart()
+            msg['From'] = f"CodeRipple <{sender_email}>"
+            msg['To'] = email_addr
+            msg['Subject'] = f"Invitation to contribute to {repo_name} on CodeRipple"
+            
+            html = f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                    <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                        <h2 style="color: #2563eb;">CodeRipple Invitation</h2>
+                        <p>You have been invited to collaborate on the repository: <strong>{repo_name}</strong>.</p>
+                        <p>Click the button below to accept the invitation and link your GitHub account:</p>
+                        <div style="margin: 30px 0;">
+                            <a href="{link}" style="padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Accept Invitation</a>
+                        </div>
+                        <p style="font-size: 0.9em; color: #666;">If you didn't expect this invitation, you can safely ignore this email.</p>
+                        <p style="margin-top: 30px; font-size: 0.8em; color: #999;">Best regards,<br>CodeRipple Team</p>
+                    </div>
+                </body>
+            </html>
+            """
+            
+            msg.attach(MIMEText(html, 'html'))
+            server.send_message(msg)
+            
+        server.quit()
+        return jsonify({"status": "sent", "count": len(invite_links)})
+    except Exception as e:
+        logger.exception("Failed to send invite emails")
+        return error_response(f"Failed to send email: {str(e)}", 500)
+
+
+@app.route("/api/github-add-collaborator", methods=["POST"])
+def add_github_collaborator():
+    import urllib.request
+    import json as _json
+    body = request.get_json(silent=True)
+    if not body:
+        return error_response("Request body must be JSON")
+    
+    repo_name = body.get("repo_name")
+    github_username = body.get("github_username")
+    
+    if not repo_name or not github_username:
+        return error_response("Missing repo_name or github_username")
+        
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if not gh_token:
+        load_dotenv(os.path.join(os.path.dirname(__file__), "..", "frontend", ".env"))
+        gh_token = os.environ.get("GITHUB_TOKEN", "")
+        
+    if gh_token:
+        gh_token = gh_token.strip().strip('"').strip("'")
+        
+    if not gh_token:
+        return error_response("GITHUB_TOKEN is missing in frontend .env. Please add it to invite users on GitHub.", 500)
+        
+    url = f"https://api.github.com/repos/{repo_name}/collaborators/{github_username}"
+    
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"Bearer {gh_token}",
+        "Content-Length": "0" # PUT request requires Content-Length
+    }
+    
+    try:
+        req = urllib.request.Request(url, headers=headers, method="PUT")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return jsonify({"status": "success", "message": f"Successfully invited {github_username} to {repo_name} on GitHub."})
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8')
+        logger.error(f"GitHub API error {e.code}: {body}")
+        if e.code == 404:
+            return error_response("Repository not found or lacking permissions to add collaborators.", 404)
+        return error_response(f"GitHub error: {body}", e.code)
+    except Exception as e:
+        logger.exception("Failed to invite collaborator on GitHub")
+        return error_response(f"Failed to invite on GitHub: {str(e)}", 500)
 
 
 @app.route("/api/analyze", methods=["POST"])
@@ -260,8 +375,9 @@ def analyze_commit():
     try:
         features         = extract_features(body)
         prediction       = run_prediction(features)
-        reasons          = generate_risk_reasons(features, prediction["pred_risk_label"], prediction["pred_risk_score"])
-        categories       = derive_risk_categories(features)
+        mode             = prediction.get("mode", "model")
+        reasons          = generate_risk_reasons(features, prediction["pred_risk_label"], prediction["pred_risk_score"], mode)
+        categories       = derive_risk_categories(features, mode)
         display_features = {k: v for k, v in features.items() if k != "_meta"}
 
         return jsonify({
@@ -296,7 +412,7 @@ def analyze_batch():
     if not files:
         return error_response("'files' list is required")
 
-    # ── Separate generated files from real code files ─────────────────────
+    #  Separate generated files from real code files 
     generated_files = []
     code_files      = []
     for f in files:
@@ -306,7 +422,7 @@ def analyze_batch():
         else:
             code_files.append(f)
 
-    # ── All files generated → force LOW RISK ─────────────────────────────
+    #  All files generated → force LOW RISK 
     if not code_files:
         gen_results = [{
             "file":                    f.get("filename", f.get("file", "")),
@@ -340,7 +456,7 @@ def analyze_batch():
             "analyzed_at":  datetime.now(timezone.utc).isoformat(),
         })
 
-    # ── Analyze each code file individually ───────────────────────────────
+    #  Analyze each code file individually 
     results      = []
     all_features = []
 
@@ -376,8 +492,9 @@ def analyze_batch():
         try:
             features        = extract_features(row)
             pred            = run_prediction(features)
-            file_categories = derive_risk_categories(features)
-            file_reasons    = generate_risk_reasons(features, pred["pred_risk_label"], pred["pred_risk_score"])
+            file_mode       = pred.get("mode", "model")
+            file_categories = derive_risk_categories(features, file_mode)
+            file_reasons    = generate_risk_reasons(features, pred["pred_risk_label"], pred["pred_risk_score"], file_mode)
             all_features.append(features)
 
             # -- Sensitive file override: force security 100% for this file --
@@ -385,9 +502,9 @@ def analyze_batch():
             if file_is_sensitive:
                 file_sec_risk  = 1.0
                 file_risk_score = 1.0
-                file_risk_label = "CRITICAL RISK"
+                file_risk_label = "HIGH RISK"
                 file_sec_reasons = [
-                    f"CRITICAL: Sensitive file committed ({filename}) "
+                    f"HIGH: Sensitive file committed ({filename}) "
                     "— credentials or secret keys may be exposed"
                 ]
             else:
@@ -421,12 +538,12 @@ def analyze_batch():
                 "error": str(e), "is_generated": False,
             })
 
-    # ── Aggregate: worst-case score from code files ───────────────────────
+    #  Aggregate: worst-case score from code files 
     code_scores = [r["risk_score"] for r in results if not r.get("is_generated") and "risk_score" in r]
     agg_score   = max(code_scores) if code_scores else 0.05
 
     if agg_score >= 1.0:
-        agg_label = "CRITICAL RISK"
+        agg_label = "HIGH RISK"
     elif agg_score >= 0.65:
         agg_label = "HIGH RISK"
     elif agg_score >= 0.35:
@@ -490,9 +607,9 @@ def manage_risk_cache(sha: str):
         return jsonify({"status": "cached"})
 
 
-# ─────────────────────────────────────────────
+# 
 # Debug / Inspection Routes
-# ─────────────────────────────────────────────
+# 
 
 def _build_inspect_response(sha, owner, repo, gh_files, description):
     combined_patch = "\n".join(f.get("patch", "") for f in gh_files if f.get("patch"))
@@ -637,9 +754,9 @@ def inspect_commit(owner: str, repo: str, sha: str):
         return error_response(f"Inspect failed: {str(e)}", 500)
 
 
-# ─────────────────────────────────────────────
+# 
 # Main
-# ─────────────────────────────────────────────
+# 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"Starting CodeRipple backend on port {port}")

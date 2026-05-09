@@ -15,7 +15,6 @@ interface RiskBarChartProps {
     low: number;
     medium: number;
     high: number;
-    critical: number;
   };
   className?: string;
 }
@@ -25,7 +24,6 @@ export function RiskBarChart({ data, className }: RiskBarChartProps) {
     { name: 'Low', value: data.low, color: CHART_COLORS.success },
     { name: 'Medium', value: data.medium, color: CHART_COLORS.warning },
     { name: 'High', value: data.high, color: CHART_COLORS.danger },
-    { name: 'Critical', value: data.critical, color: 'hsl(330, 85%, 50%)' },
   ];
 
   return (

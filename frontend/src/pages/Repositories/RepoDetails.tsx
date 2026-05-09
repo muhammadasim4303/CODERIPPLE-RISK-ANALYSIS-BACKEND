@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft, GitCommit, Clock, RefreshCw, ExternalLink,
-  GitBranch, AlertCircle, ChevronDown, Play, Bug, Star, GitFork, Info, Loader2,
+  GitBranch, AlertCircle, ChevronDown, Play, Bug, Star, GitFork, Info, Loader2, Users, UserPlus, X, Trash2, PlusCircle
 } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
 import { MainLayout } from '@/components/layouts/MainLayout';
 import { useRepositories } from '@/hooks/useRepositories';
 import { useCommits } from '@/hooks/useCommits';
@@ -11,6 +12,7 @@ import { listIssues, type GHIssue } from '@/lib/githubService';
 import { RiskBadge, RiskScoreBar } from '@/components/common/RiskBadge';
 import { PageLoader } from '@/components/common/Loader';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -51,6 +53,88 @@ export default function RepoDetails() {
   const [issuesLoading, setIssuesLoading] = useState(false);
   const [issueFilter, setIssueFilter] = useState<'open' | 'closed' | 'all'>('open');
   const [analyzingAll, setAnalyzingAll] = useState(false);
+  const [activeTab, setActiveTab] = useState('commits');
+
+  const [contributors, setContributors] = useState<any[]>([]);
+  const [contributorsLoading, setContributorsLoading] = useState(false);
+  const [showAddContributor, setShowAddContributor] = useState(false);
+  const [inviteEmails, setInviteEmails] = useState('');
+  const [isInviting, setIsInviting] = useState(false);
+
+  const loadContributors = async () => {
+    if (!fullName) return;
+    setContributorsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('repo_contributors')
+        .select('*')
+        .eq('repo_name', fullName)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setContributors(data || []);
+    } catch (err: any) {
+      toast({ title: 'Error loading contributors', description: err.message, variant: 'destructive' });
+    } finally {
+      setContributorsLoading(false);
+    }
+  };
+
+  const handleInvite = async () => {
+    const emails = inviteEmails.split(',').map(e => e.trim()).filter(Boolean);
+    if (!emails.length) return;
+    
+    setIsInviting(true);
+    try {
+      const inviteLinks: Record<string, string> = {};
+      let addedCount = 0;
+      
+      for (const email of emails) {
+        const token = crypto.randomUUID();
+        const { error } = await supabase
+            .from('repo_contributors')
+            .insert({ repo_name: fullName, email: email, token: token });
+            
+        if (error) {
+            console.error("Invite error:", error);
+            // Likely a duplicate unique token or unique email constraint if we set one
+            // We ignore to allow inviting others in the same loop
+        } else {
+            inviteLinks[email] = `http://localhost:5173/accept-invite?token=${token}`;
+            addedCount++;
+        }
+      }
+      
+      if (addedCount > 0) {
+          const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/send-invite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repo_name: fullName, invite_links: inviteLinks })
+          });
+          
+          if (!res.ok) throw new Error('Failed to send emails via backend');
+      }
+      
+      toast({ title: 'Invites sent!', description: `Successfully invited ${addedCount} contributors.` });
+      setInviteEmails('');
+      setShowAddContributor(false);
+      loadContributors();
+    } catch (err: any) {
+      toast({ title: 'Error sending invites', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleDeleteContributor = async (id: string) => {
+    try {
+      const { error } = await supabase.from('repo_contributors').delete().eq('id', id);
+      if (error) throw error;
+      toast({ title: 'Contributor removed', description: 'They have been removed from the list.' });
+      loadContributors();
+    } catch (err: any) {
+      toast({ title: 'Error removing contributor', description: err.message, variant: 'destructive' });
+    }
+  };
 
   // Load issues when tab switches to issues
   const loadIssues = async (state: 'open' | 'closed' | 'all' = 'open') => {
@@ -170,8 +254,8 @@ export default function RepoDetails() {
           </div>
         </div>
 
-        {/* Tabs: Commits | Issues | Risk Summary */}
-        <Tabs defaultValue="commits" className="space-y-4">
+        {/* Tabs: Commits | Issues | Contributors | Risk Summary */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <div className="flex items-center justify-between">
             <TabsList className="bg-secondary/50 border border-border">
               <TabsTrigger value="commits" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
@@ -181,22 +265,41 @@ export default function RepoDetails() {
                 onClick={() => loadIssues(issueFilter)}>
                 Issues {repo?.open_issues_count ? <span className="ml-1.5 rounded-full bg-primary/20 px-1.5 text-xs">{repo.open_issues_count}</span> : null}
               </TabsTrigger>
+              <TabsTrigger value="contributors" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+                onClick={() => loadContributors()}>
+                Contributors {contributors.length > 0 && <span className="ml-1.5 rounded-full bg-primary/20 px-1.5 text-xs">{contributors.length}</span>}
+              </TabsTrigger>
               <TabsTrigger value="summary" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
                 Risk Summary
               </TabsTrigger>
             </TabsList>
 
-            {/* Analyze all button */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 border-border text-xs"
-              onClick={handleAnalyzeAll}
-              disabled={analyzingAll || commitsLoading}
-            >
-              {analyzingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              Analyze All
-            </Button>
+            <div className="flex items-center gap-2">
+              {activeTab === 'commits' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-border text-xs"
+                  onClick={handleAnalyzeAll}
+                  disabled={analyzingAll || commitsLoading}
+                >
+                  {analyzingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                  Analyze All
+                </Button>
+              )}
+              {activeTab === 'issues' && (
+                <a href={`https://github.com/${fullName}/issues/new`} target="_blank" rel="noreferrer">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="gap-2 text-xs"
+                  >
+                    <PlusCircle className="h-3.5 w-3.5" />
+                    Open New Issue
+                  </Button>
+                </a>
+              )}
+            </div>
           </div>
 
           {/* ── Commits Tab ─────────────────────────────────────── */}
@@ -335,6 +438,89 @@ export default function RepoDetails() {
                 <ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors mt-0.5" />
               </a>
             ))}
+          </TabsContent>
+
+          {/* ── Contributors Tab ──────────────────────────────── */}
+          <TabsContent value="contributors" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" /> Repository Contributors
+              </h3>
+              <Button onClick={() => setShowAddContributor(!showAddContributor)} size="sm" className="gap-2">
+                {showAddContributor ? <X className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
+                {showAddContributor ? 'Close' : 'Add Contributor'}
+              </Button>
+            </div>
+
+            {showAddContributor && (
+              <div className="glass-card animate-slide-up p-5 rounded-xl border border-primary/20 bg-primary/5 space-y-4">
+                <div>
+                  <h4 className="font-medium text-foreground mb-1">Invite new contributors</h4>
+                  <p className="text-xs text-muted-foreground">Enter comma-separated email addresses to send invitations.</p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Input
+                    placeholder="e.g. developer@example.com, john@doe.com"
+                    value={inviteEmails}
+                    onChange={(e) => setInviteEmails(e.target.value)}
+                    className="flex-1 bg-background"
+                  />
+                  <Button onClick={handleInvite} disabled={isInviting || !inviteEmails.trim()} className="gap-2">
+                    {isInviting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                    Send Invites
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {contributorsLoading && <PageLoader />}
+            
+            {!contributorsLoading && contributors.length === 0 && !showAddContributor && (
+              <div className="flex h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border p-6 text-center">
+                <Users className="h-8 w-8 text-muted-foreground/30 mb-2" />
+                <p className="text-muted-foreground text-sm">No external contributors added yet.</p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              {contributors.map((c, i) => (
+                <div key={c.id} className="glass-card flex items-center gap-4 rounded-xl p-4 animate-slide-up" style={{ animationDelay: `${i * 30}ms` }}>
+                  <Avatar className="h-12 w-12 border-2 border-primary/10">
+                    {c.status === 'accepted' ? (
+                      <AvatarImage src={`https://github.com/${c.github_username}.png`} />
+                    ) : null}
+                    <AvatarFallback className="bg-secondary text-secondary-foreground">
+                      {c.email.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-foreground truncate">
+                      {c.status === 'accepted' ? c.github_username : c.email.split('@')[0]}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{c.email}</p>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-3">
+                    {c.status === 'accepted' ? (
+                      <span className="inline-flex items-center rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-semibold text-green-500 border border-green-500/20">
+                        Accepted
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-500 border border-amber-500/20">
+                        Pending
+                      </span>
+                    )}
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => handleDeleteContributor(c.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </TabsContent>
 
           {/* ── Risk Summary Tab ─────────────────────────────────── */}

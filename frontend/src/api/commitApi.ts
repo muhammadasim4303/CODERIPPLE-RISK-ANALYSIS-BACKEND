@@ -39,7 +39,7 @@ export interface CommitDetails extends Commit {
 export interface CommitListParams {
   page?: number;
   limit?: number;
-  risk_filter?: 'all' | 'low' | 'medium' | 'high' | 'critical';
+  risk_filter?: 'all' | 'low' | 'medium' | 'high';
   author?: string;
 }
 

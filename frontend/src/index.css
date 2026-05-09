@@ -40,8 +40,6 @@
     --risk-medium-foreground: 0 0% 100%;
     --risk-high: 0 75% 50%;
     --risk-high-foreground: 0 0% 100%;
-    --risk-critical: 330 85% 45%;
-    --risk-critical-foreground: 0 0% 100%;
 
     /* Semantic colors */
     --success: 145 70% 35%;
@@ -120,8 +118,6 @@
     --risk-medium-foreground: 40 95% 15%;
     --risk-high: 0 75% 55%;
     --risk-high-foreground: 0 0% 100%;
-    --risk-critical: 330 85% 50%;
-    --risk-critical-foreground: 0 0% 100%;
 
     /* Semantic colors - Dark */
     --success: 145 70% 42%;
@@ -208,10 +204,6 @@
 
   .risk-badge-high {
     @apply bg-risk-high/15 text-risk-high border border-risk-high/30;
-  }
-
-  .risk-badge-critical {
-    @apply bg-risk-critical/15 text-risk-critical border border-risk-critical/30;
   }
 
   /* Animated gradient text */
