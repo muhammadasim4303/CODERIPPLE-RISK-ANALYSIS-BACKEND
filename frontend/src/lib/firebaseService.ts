@@ -157,9 +157,13 @@ export interface FBChangeImpactScore {
 // ─── Repositories ─────────────────────────────────────────────────────────────
 
 export async function upsertRepo(userId: string, repo: Omit<FBRepo, 'userId'>): Promise<void> {
-  const repoId = repo.full_name.replace("/", "_");
-  const ref = doc(db, 'users', userId, 'repositories', repoId);
+  const repoIdStr = repo.full_name.replace("/", "_");
+  const ref = doc(db, 'users', userId, 'repositories', repoIdStr);
   await setDoc(ref, { ...repo, userId, updated_at: new Date().toISOString() }, { merge: true });
+
+  // Cache the owner mapping globally so collaborators can bypass collectionGroup and missing index errors
+  const ownerRef = doc(db, 'repo_owners', repoIdStr);
+  await setDoc(ownerRef, { ownerId: userId }, { merge: true });
 }
 
 export async function listRepos(userId: string): Promise<FBRepo[]> {
@@ -209,11 +213,22 @@ export async function upsertRiskScore(userId: string, score: Omit<FBRiskScore, '
   );
 }
 
+import { collectionGroup } from 'firebase/firestore';
+
 export async function getRiskScore(userId: string, repoFullName: string, sha: string): Promise<FBRiskScore | null> {
-  const snap = await getDoc(
-    doc(db, 'users', userId, 'repositories', repoId(repoFullName), 'riskScores', sha)
-  );
-  return snap.exists() ? (snap.data() as FBRiskScore) : null;
+  // Try local first
+  const localSnap = await getDoc(doc(db, 'users', userId, 'repositories', repoId(repoFullName), 'riskScores', sha));
+  if (localSnap.exists()) return localSnap.data() as FBRiskScore;
+
+  // Fallback to owner's data if local fails (for collaborators)
+  const ownerDoc = await getDoc(doc(db, 'repo_owners', repoId(repoFullName)));
+  if (ownerDoc.exists() && ownerDoc.data().ownerId) {
+    const ownerId = ownerDoc.data().ownerId;
+    const ownerSnap = await getDoc(doc(db, 'users', ownerId, 'repositories', repoId(repoFullName), 'riskScores', sha));
+    if (ownerSnap.exists()) return ownerSnap.data() as FBRiskScore;
+  }
+
+  return null;
 }
 
 export async function listRiskScoresByRepo(
@@ -221,12 +236,23 @@ export async function listRiskScoresByRepo(
   repoFullName: string,
   branch?: string
 ): Promise<FBRiskScore[]> {
-  const base = collection(db, 'users', userId, 'repositories', repoId(repoFullName), 'riskScores');
-  const q = branch
-    ? query(base, where('branch', '==', branch), orderBy('committed_at', 'desc'), limit(100))
-    : query(base, orderBy('committed_at', 'desc'), limit(100));
-  const snap = await getDocs(q);
-  return snap.docs.map(d => d.data() as FBRiskScore);
+  // 1. Try finding the global ownerId to fetch directly without collectionGroup
+  let targetId = userId;
+  const ownerDoc = await getDoc(doc(db, 'repo_owners', repoId(repoFullName)));
+  if (ownerDoc.exists() && ownerDoc.data().ownerId) {
+    targetId = ownerDoc.data().ownerId;
+  }
+
+  // 2. Query the direct collection (NO INDEXES REQUIRED!)
+  const base = collection(db, 'users', targetId, 'repositories', repoId(repoFullName), 'riskScores');
+  const snap = await getDocs(base);
+  
+  let results = snap.docs.map(d => d.data() as FBRiskScore);
+  
+  // Sort and limit in memory
+  return results
+    .sort((a, b) => b.committed_at.localeCompare(a.committed_at))
+    .slice(0, 100);
 }
 
 export async function listAllRiskScores(userId: string, maxItems = 500): Promise<FBRiskScore[]> {
@@ -267,10 +293,23 @@ export async function getChangeImpactScore(
   repoFullName: string,
   sha: string
 ): Promise<FBChangeImpactScore | null> {
-  const snap = await getDoc(
+  // Try local first
+  const localSnap = await getDoc(
     doc(db, 'users', userId, 'repositories', repoId(repoFullName), 'changeImpactScores', sha)
   );
-  return snap.exists() ? (snap.data() as FBChangeImpactScore) : null;
+  if (localSnap.exists()) return localSnap.data() as FBChangeImpactScore;
+
+  // Fallback to owner's data if local fails (for collaborators)
+  const ownerDoc = await getDoc(doc(db, 'repo_owners', repoId(repoFullName)));
+  if (ownerDoc.exists() && ownerDoc.data().ownerId) {
+    const ownerId = ownerDoc.data().ownerId;
+    const ownerSnap = await getDoc(
+      doc(db, 'users', ownerId, 'repositories', repoId(repoFullName), 'changeImpactScores', sha)
+    );
+    if (ownerSnap.exists()) return ownerSnap.data() as FBChangeImpactScore;
+  }
+
+  return null;
 }
 
 export async function listChangeImpactScoresByRepo(

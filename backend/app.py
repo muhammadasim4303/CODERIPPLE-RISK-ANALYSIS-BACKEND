@@ -754,6 +754,99 @@ def inspect_commit(owner: str, repo: str, sha: str):
         return error_response(f"Inspect failed: {str(e)}", 500)
 
 
+@app.route("/api/repos/<owner>/<repo>/commits", methods=["GET"])
+def get_repo_commits(owner: str, repo: str):
+    import urllib.request
+    import json as _json
+    branch = request.args.get("branch")
+    
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if not gh_token:
+        load_dotenv(os.path.join(os.path.dirname(__file__), "..", "frontend", ".env"))
+        gh_token = os.environ.get("GITHUB_TOKEN", "")
+    gh_token = gh_token.strip().strip('"').strip("'")
+    
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits?per_page=30"
+    if branch:
+        url += f"&sha={branch}"
+        
+    headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "CodeRipple"}
+    if gh_token:
+        headers["Authorization"] = f"Bearer {gh_token}"
+        
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            commits = _json.loads(resp.read())
+            return jsonify(commits)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8')
+        logger.error(f"GitHub API error {e.code}: {body}")
+        return error_response(f"GitHub error: {body}", e.code)
+    except Exception as e:
+        logger.exception("Failed to fetch commits")
+        return error_response(str(e), 500)
+
+@app.route("/api/repos/<owner>/<repo>/branches", methods=["GET"])
+def get_repo_branches(owner: str, repo: str):
+    import urllib.request
+    import json as _json
+    
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if not gh_token:
+        load_dotenv(os.path.join(os.path.dirname(__file__), "..", "frontend", ".env"))
+        gh_token = os.environ.get("GITHUB_TOKEN", "")
+    gh_token = gh_token.strip().strip('"').strip("'")
+    
+    url = f"https://api.github.com/repos/{owner}/{repo}/branches?per_page=100"
+        
+    headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "CodeRipple"}
+    if gh_token:
+        headers["Authorization"] = f"Bearer {gh_token}"
+        
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            branches = _json.loads(resp.read())
+            return jsonify(branches)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8')
+        logger.error(f"GitHub API error {e.code}: {body}")
+        return error_response(f"GitHub error: {body}", e.code)
+    except Exception as e:
+        logger.exception("Failed to fetch branches")
+        return error_response(str(e), 500)
+
+@app.route("/api/repos/<owner>/<repo>/commit/<sha>", methods=["GET"])
+def get_repo_single_commit(owner: str, repo: str, sha: str):
+    import urllib.request
+    import json as _json
+    
+    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    if not gh_token:
+        load_dotenv(os.path.join(os.path.dirname(__file__), "..", "frontend", ".env"))
+        gh_token = os.environ.get("GITHUB_TOKEN", "")
+    gh_token = gh_token.strip().strip('"').strip("'")
+    
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}"
+        
+    headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "CodeRipple"}
+    if gh_token:
+        headers["Authorization"] = f"Bearer {gh_token}"
+        
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            commit_data = _json.loads(resp.read())
+            return jsonify(commit_data)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8')
+        logger.error(f"GitHub API error {e.code}: {body}")
+        return error_response(f"GitHub error: {body}", e.code)
+    except Exception as e:
+        logger.exception("Failed to fetch commit details")
+        return error_response(str(e), 500)
+
 # 
 # Main
 # 

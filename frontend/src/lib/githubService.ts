@@ -109,8 +109,19 @@ export async function listRepos(page = 1): Promise<GHRepo[]> {
 export async function listBranches(owner: string, repo: string): Promise<GHBranch[]> {
   try {
     const res = await ghEdge('list-branches', { owner, repo });
-    return Array.isArray(res) ? res : [];
+    if (Array.isArray(res) && res.length > 0) return res;
+    throw new Error('Empty or invalid response from edge function');
   } catch {
+    try {
+      const url = `${import.meta.env.VITE_API_BASE_URL}/repos/${owner}/${repo}/branches`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) return data;
+      }
+    } catch (err) {
+      console.error("Backend listBranches fallback failed:", err);
+    }
     return [];
   }
 }
@@ -120,11 +131,41 @@ export async function listCommits(
 ): Promise<GHCommit[]> {
   const params: Record<string, string> = { owner, repo, page: String(page), per_page: '30' };
   if (branch) params.sha = branch;
-  return ghEdge('list-commits', params);
+  try {
+    const res = await ghEdge('list-commits', params);
+    if (Array.isArray(res) && res.length > 0) return res;
+    throw new Error('Empty or invalid response from edge function');
+  } catch (err) {
+    try {
+      let url = `${import.meta.env.VITE_API_BASE_URL}/repos/${owner}/${repo}/commits`;
+      if (branch) url += `?branch=${branch}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) return data;
+      }
+    } catch (fallbackErr) {
+      console.error("Backend listCommits fallback failed:", fallbackErr);
+    }
+    return [];
+  }
 }
 
 export async function getCommit(owner: string, repo: string, sha: string): Promise<GHCommit> {
-  return ghEdge('get-commit', { owner, repo, sha });
+  try {
+    return await ghEdge('get-commit', { owner, repo, sha });
+  } catch (err) {
+    try {
+      const url = `${import.meta.env.VITE_API_BASE_URL}/repos/${owner}/${repo}/commit/${sha}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (fallbackErr) {
+      console.error("Backend getCommit fallback failed:", fallbackErr);
+    }
+    throw err;
+  }
 }
 
 export async function listIssues(

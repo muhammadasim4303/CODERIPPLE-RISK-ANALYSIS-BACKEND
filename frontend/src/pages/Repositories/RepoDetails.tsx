@@ -99,8 +99,17 @@ export default function RepoDetails() {
             // Likely a duplicate unique token or unique email constraint if we set one
             // We ignore to allow inviting others in the same loop
         } else {
-            inviteLinks[email] = `http://localhost:5173/accept-invite?token=${token}`;
+            const link = `${window.location.origin}/accept-invite?token=${token}`;
+            inviteLinks[email] = link;
             addedCount++;
+            
+            // Insert notification
+            await supabase.from('notifications').insert({
+              user_email: email,
+              title: "Repository Invitation",
+              message: `You have been invited to collaborate on ${fullName}.`,
+              link: `/accept-invite?token=${token}`
+            });
         }
       }
       

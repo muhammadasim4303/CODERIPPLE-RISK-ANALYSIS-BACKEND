@@ -65,14 +65,53 @@ export function useCommits(owner?: string, repo?: string) {
     setIsLoading(true);
     setError(null);
     try {
-      const ghCommits = await listCommits(owner, repo, 1, branch || undefined);
+      let ghCommits: GHCommit[] = [];
+      try {
+        ghCommits = await listCommits(owner, repo, 1, branch || undefined);
+      } catch (e) {
+        console.warn("listCommits failed (possibly due to missing GitHub access):", e);
+      }
+
+      // Fallback: If GitHub API failed or returned empty (common for collaborators on private repos who haven't accepted the GitHub invite),
+      // fetch the commits that were already analyzed and saved in Firebase by the owner.
+      if (ghCommits.length === 0 && user) {
+        try {
+          const fbScores = await listRiskScoresByRepo(user.id, `${owner}/${repo}`, branch || undefined);
+          ghCommits = fbScores.map(fb => ({
+            sha: fb.sha,
+            commit: {
+              message: fb.message,
+              author: { name: fb.author_name, email: '', date: fb.committed_at },
+              committer: { name: fb.author_name, date: fb.committed_at }
+            },
+            author: { login: fb.author_name, avatar_url: fb.author_avatar, html_url: '' },
+            stats: { additions: fb.additions, deletions: fb.deletions, total: fb.additions + fb.deletions },
+            html_url: `https://github.com/${owner}/${repo}/commit/${fb.sha}`
+          }));
+        } catch (fbErr) {
+          console.warn("Fallback to Firebase commits failed:", fbErr);
+        }
+      }
+
+      // Pre-fetch all risk scores for this repo to hydrate commits efficiently
+      let fbScoresMap = new Map<string, FBRiskScore>();
+      if (user) {
+        try {
+          const allScores = await listRiskScoresByRepo(user.id, `${owner}/${repo}`, branch || undefined);
+          for (const s of allScores) {
+            fbScoresMap.set(s.sha, s);
+          }
+        } catch (e) {
+          console.warn("Failed to pre-fetch risk scores:", e);
+        }
+      }
 
       // Hydrate with cached risk scores from Firebase
       const rows: CommitRow[] = await Promise.all(
         ghCommits.map(async (c): Promise<CommitRow> => {
           let risk: RiskResult | null = null;
           if (user) {
-            const fb = await getRiskScore(user.id, `${owner}/${repo}`, c.sha);
+            const fb = fbScoresMap.get(c.sha) || await getRiskScore(user.id, `${owner}/${repo}`, c.sha).catch(() => null);
             if (fb) {
               risk = {
                 sha:                    fb.sha,
@@ -90,7 +129,7 @@ export function useCommits(owner?: string, repo?: string) {
                 per_file:               fb.per_file ?? [],
               };
             } else {
-              risk = await getCachedRisk(c.sha);
+              risk = await getCachedRisk(c.sha).catch(() => null);
             }
           }
           return { ...c, risk };

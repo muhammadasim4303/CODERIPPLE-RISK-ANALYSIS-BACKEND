@@ -6,8 +6,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { listRepos, type GHRepo } from '@/lib/githubService';
 import { upsertRepo, listRepos as fbListRepos, listRiskScoresByRepo, type FBRepo } from '@/lib/firebaseService';
+import { supabase } from '@/lib/supabaseClient';
 
-export type Repository = FBRepo & { html_url?: string; topics?: string[]; pushed_at?: string };
+export type Repository = FBRepo & { html_url?: string; topics?: string[]; pushed_at?: string; is_collab?: boolean };
 
 // Module-level cache — survives navigation, cleared after 5 min
 const repoCache = new Map<string, { data: Repository[]; ts: number }>();
@@ -15,18 +16,18 @@ const CACHE_TTL = 5 * 60 * 1000;
 
 function ghToFBBase(r: GHRepo): Omit<FBRepo, 'userId' | 'average_risk_score' | 'total_commits_analyzed' | 'high_risk_commits_count' | 'medium_risk_commits_count' | 'low_risk_commits_count' | 'last_analyzed_at'> {
   return {
-    id: String(r.id),
+    id: String(r.id || r.full_name),
     name: r.name,
     full_name: r.full_name,
     description: r.description,
     private: r.private,
     language: r.language,
-    stars_count: r.stargazers_count,
-    forks_count: r.forks_count,
-    open_issues_count: r.open_issues_count,
-    default_branch: r.default_branch,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
+    stars_count: r.stargazers_count || 0,
+    forks_count: r.forks_count || 0,
+    open_issues_count: r.open_issues_count || 0,
+    default_branch: r.default_branch || 'main',
+    created_at: r.created_at || new Date().toISOString(),
+    updated_at: r.updated_at || new Date().toISOString(),
   };
 }
 
@@ -51,7 +52,46 @@ export function useRepositories() {
     setError(null);
     try {
       // 1. Pull live repos from GitHub
-      const ghRepos = await listRepos();
+      let ghRepos = await listRepos();
+
+      // 1.5. Pull collaborated repos from Supabase
+      const orConditions = [];
+      if (user.email) orConditions.push(`email.eq.${user.email}`);
+      if (user.username) orConditions.push(`github_username.eq.${user.username}`);
+      
+      if (orConditions.length > 0) {
+        const { data: collabs } = await supabase
+          .from('repo_contributors')
+          .select('repo_name')
+          .or(orConditions.join(','))
+          .eq('status', 'accepted');
+          
+        if (collabs && collabs.length > 0) {
+          const ghNames = new Set(ghRepos.map(r => r.full_name));
+          const newCollabs = collabs.filter(c => !ghNames.has(c.repo_name));
+          
+          for (const c of newCollabs) {
+            const [owner, name] = c.repo_name.split('/');
+            // Add a stub repo for UI to display
+            ghRepos.push({
+              id: c.repo_name as any,
+              name: name || c.repo_name,
+              full_name: c.repo_name,
+              description: 'Collaborated Repository',
+              private: true,
+              language: null,
+              stargazers_count: 0,
+              forks_count: 0,
+              open_issues_count: 0,
+              default_branch: 'main',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              html_url: `https://github.com/${c.repo_name}`,
+              topics: ['collaborator']
+            } as any);
+          }
+        }
+      }
 
       // 2. Read current Firebase state FIRST (has risk stats)
       const fbRepos = await fbListRepos(user.id);
