@@ -106,35 +106,13 @@ function isNonCodeCommit(files: Array<{ filename: string }>): boolean {
 }
 
 export async function getCachedRisk(sha: string): Promise<RiskResult | null> {
-  try {
-    const res = await fetch(`${BASE}/commit/${sha}/risk`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data?.risk_label) return null;
-    const mapped = mapApiResponse(data, sha);
-
-    // Invalidate stale cache: all zeros but not LOW RISK
-    const allZero =
-      mapped.overall_risk_score === 0 &&
-      mapped.correctness_risk === 0 &&
-      mapped.security_risk === 0 &&
-      mapped.maintainability_risk === 0 &&
-      mapped.integration_risk === 0;
-    if (allZero && mapped.risk_label !== 'LOW RISK') return null;
-
-    return mapped;
-  } catch {
-    return null;
-  }
+  // Legacy Flask cache is deprecated in favor of Firebase
+  return null;
 }
 
 export async function deleteCachedRisk(sha: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/commit/${sha}/risk`, { method: 'DELETE' });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  // Legacy Flask cache is deprecated in favor of Firebase
+  return true;
 }
 
 export async function analyzeCommit(
@@ -194,14 +172,8 @@ export async function analyzeCommit(
   const raw = await res.json();
   const result = mapApiResponse(raw, sha);
 
-  // Cache it back
-  try {
-    await fetch(`${BASE}/commit/${sha}/risk`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(result),
-    });
-  } catch { /* ignore cache errors */ }
+  // Note: Caching is now handled purely in Firebase via upsertRiskScore in the UI components
+
 
   return result;
 }

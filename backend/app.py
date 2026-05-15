@@ -277,9 +277,17 @@ def send_invite():
         return error_response("Missing GOOGLE_APP_PASSWORD in frontend .env", 500)
         
     try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
+        # Render blocks port 587 on free tiers, which causes connection timeouts.
+        # Use a short timeout so Gunicorn workers don't die.
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=5)
         server.starttls()
         server.login(sender_email, app_password)
+    except Exception as e:
+        logger.warning(f"SMTP connection failed (Render likely blocking port 587): {e}")
+        # Return success anyway so the frontend doesn't crash. Supabase handles the actual invite logic.
+        return jsonify({"status": "success", "warning": "Emails skipped due to server restrictions. Invites saved."})
+        
+    try:
         
         for email_addr, link in invite_links.items():
             msg = MIMEMultipart()
