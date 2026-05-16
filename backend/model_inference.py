@@ -317,4 +317,9 @@ def predict(feature_vector: list) -> dict:
 
 
 def is_model_available() -> bool:
-    return os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH)
+    try:
+        _load_artifacts()
+        return True
+    except Exception as e:
+        logging.warning(f"Model failed to become available: {e}")
+        return False
