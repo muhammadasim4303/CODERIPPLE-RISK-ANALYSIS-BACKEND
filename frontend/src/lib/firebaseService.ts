@@ -496,6 +496,7 @@ export async function mergeCodeRippleResult(
     cr_contributing_factors: cr.contributing_factors,
     cr_feature_breakdown: cr.feature_breakdown,
     cr_dependency_graph: cr.dependency_graph,
+    analyzed_at: new Date().toISOString(),
   }, { merge: true });
 }
 

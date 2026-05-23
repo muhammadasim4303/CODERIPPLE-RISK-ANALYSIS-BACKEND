@@ -43,13 +43,33 @@ function changeTypeLabel(ct: string) {
   return 'Format Only';
 }
 
+function formatNodeLabel(rawLabel: string, nodeId: string, category: string): string {
+  const stripped = rawLabel.replace(/^file::/i, '').replace(/^func::/i, '');
+  if (!stripped || stripped === '__file__' || stripped === '__module__') {
+    const base = nodeId.split('::')[0];
+    return base.split(/[/\\]/).pop() ?? base;
+  }
+  if ((stripped.includes('/') || stripped.includes('\\')) &&
+      (category === 'changed' || category === 'direct' || category === 'unaffected')) {
+    return stripped.split(/[/\\]/).pop() ?? stripped;
+  }
+  if (stripped.includes('::')) {
+    const [filePart, fnPart] = stripped.split('::');
+    if (category === 'changed' || category === 'direct') {
+      return (fnPart || filePart.split(/[/\\]/).pop()) ?? filePart;
+    }
+    return fnPart || filePart;
+  }
+  return stripped;
+}
+
 function buildGraphData(score: FBRiskScore) {
   if (score.cr_dependency_graph?.nodes?.length) {
     const { nodes, edges } = score.cr_dependency_graph;
     return {
       nodes: nodes.map(n => ({
         id: n.id,
-        label: n.label,
+        label: formatNodeLabel(n.label ?? '', n.id, n.category ?? ''),
         type: (n.category === 'changed' ? 'source' : n.category === 'direct' ? 'impacted' : 'unaffected') as 'source' | 'impacted' | 'unaffected',
         risk_score: n.category === 'changed' ? (score.cr_risk_score ?? score.overall_risk_score)
           : n.category === 'direct' ? (score.cr_risk_score ?? score.overall_risk_score) * 0.7
@@ -133,13 +153,16 @@ export default function ChangeImpact() {
   const [analyzing, setAnalyzing] = useState<string | null>(null);
   const [isWiping, setIsWiping] = useState(false);
 
-  const loadScores = async () => {
+  const loadScores = async (preserveSha?: string) => {
     if (!user) return;
     setIsLoading(true);
     try {
       const s = await listAllRiskScores(user.id, 100);
       setScores(s);
-      if (s.length) setSelected(s[0]);
+      if (s.length) {
+        const toSelect = preserveSha ? s.find(item => item.sha === preserveSha) : null;
+        setSelected(toSelect || s[0]);
+      }
     } catch { setScores([]); }
     finally { setIsLoading(false); }
   };
@@ -170,7 +193,7 @@ export default function ChangeImpact() {
     try {
       // Pass repoFullName ("owner/repo") — CR backend clones it automatically
       const cr = await analyzeAndStoreCR(user.id, selected.sha, selected.repoFullName);
-      if (cr) await loadScores();
+      if (cr) await loadScores(selected.sha);
     } finally { setAnalyzing(null); }
   };
 
