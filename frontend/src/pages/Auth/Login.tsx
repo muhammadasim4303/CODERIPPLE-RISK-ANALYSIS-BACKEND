@@ -7,8 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 export default function Login() {
+  useDocumentTitle('Login');
   const navigate = useNavigate();
   const { login, signup, loginWithGitHub, isAuthenticated, isLoading, authProvider } = useAuth();
 

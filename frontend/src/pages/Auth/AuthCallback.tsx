@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Zap, Loader2 } from 'lucide-react';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 export default function AuthCallback() {
+  useDocumentTitle('Authenticating...');
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatNumber, formatPercentage } from '@/utils/formatters';
 import { Link } from 'react-router-dom';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 function StatCard({ title, value, icon, trend, className }: {
   title: string; value: string | number; icon: React.ReactNode;
@@ -38,6 +39,7 @@ function StatCard({ title, value, icon, trend, className }: {
 }
 
 export default function Dashboard() {
+  useDocumentTitle('Dashboard');
   const { dashboardData, isLoading, refetch } = useRiskAnalysis();
 
   if (isLoading || !dashboardData) {

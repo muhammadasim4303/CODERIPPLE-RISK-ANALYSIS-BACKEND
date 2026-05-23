@@ -29,6 +29,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { deleteChangeImpactScore } from '@/lib/firebaseService';
 import type { CRChangedFunction } from '@/types/coderippleTypes';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function changeTypeColor(ct: string) {
@@ -120,6 +121,7 @@ function FunctionRow({ fn }: { fn: CRChangedFunction }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ChangeImpact() {
+  useDocumentTitle('Change Impact');
   const { user } = useAuth();
   const { toast } = useToast();
   const [scores, setScores] = useState<FBRiskScore[]>([]);

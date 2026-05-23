@@ -9,8 +9,10 @@ import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Github, Key, Bell, Shield, RefreshCw, Trash2, Sun, Moon, Monitor } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 export default function Settings() {
+  useDocumentTitle('Settings');
   const { user } = useAuth();
   const { theme, setTheme, toggleTheme } = useTheme();
 

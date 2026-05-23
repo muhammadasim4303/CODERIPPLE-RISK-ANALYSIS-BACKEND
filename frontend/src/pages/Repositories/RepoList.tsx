@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime, formatNumber } from '@/utils/formatters';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // Language colour dots
 const LANG_COLORS: Record<string, string> = {
@@ -26,6 +27,7 @@ const LANG_COLORS: Record<string, string> = {
 };
 
 export default function RepoList() {
+  useDocumentTitle('Repositories');
   const { repositories, isLoading, error, refetch } = useRepositories();
   const [searchQuery, setSearchQuery] = useState('');
   const [langFilter, setLangFilter]   = useState('all');

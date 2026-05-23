@@ -445,7 +445,10 @@ def analyze_batch():
             "security_reasons":        [],
             "maintainability_reasons": [],
             "integration_reasons":     [],
-            "risk_reasons":            ["Generated, compiled, or non-code file"],
+            "risk_reasons":            [
+                "Generated, compiled, or non-code file" if is_generated_file(f.get("filename", f.get("file", ""))) 
+                else "File too large for inline patch (GitHub API omitted details)"
+            ],
             "added_lines":             f.get("additions", 0),
             "removed_lines":           f.get("deletions", 0),
             "is_generated":            True,

@@ -7,8 +7,10 @@ import { Label } from "@/components/ui/label";
 import { AlertCircle, CheckCircle, Github, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 
 export default function AcceptInvite() {
+  useDocumentTitle('Accept Invite');
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
   const navigate = useNavigate();

@@ -31,6 +31,8 @@ function labelColour(hex: string) {
   return { bg: `#${hex}`, text: bright > 128 ? '#000' : '#fff' };
 }
 
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+
 export default function RepoDetails() {
   const { repoId } = useParams<{ repoId: string }>();
   const { getRepository, isLoading: reposLoading } = useRepositories();
@@ -42,6 +44,8 @@ export default function RepoDetails() {
   // Parse owner/repo from full_name or id
   const fullName = repo?.full_name ?? decodedId;
   const [owner, repoName] = fullName.includes('/') ? fullName.split('/') : ['', fullName];
+
+  useDocumentTitle(repoName ? `Repository: ${repoName}` : 'Repository Details');
 
   const {
     commits, branches, currentBranch,

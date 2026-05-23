@@ -8,8 +8,10 @@ import { Shield, TrendingUp, Folder, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatPercentage } from '@/utils/formatters';
 import { Link } from 'react-router-dom';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 export default function RiskOverview() {
+  useDocumentTitle('Risk Overview');
   const { dashboardData, isLoading, refetch } = useRiskAnalysis();
 
   if (isLoading || !dashboardData) {

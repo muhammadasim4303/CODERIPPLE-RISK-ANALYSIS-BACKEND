@@ -26,9 +26,11 @@ import { cn } from '@/lib/utils';
 import { formatDate, truncateSha } from '@/utils/formatters';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 export default function CommitDetails() {
   const { sha } = useParams<{ sha: string }>();
+  useDocumentTitle(sha ? `Commit: ${sha.slice(0, 7)}` : 'Commit Details');
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const { toast } = useToast();

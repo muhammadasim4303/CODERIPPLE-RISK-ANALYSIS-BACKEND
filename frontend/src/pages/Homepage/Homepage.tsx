@@ -9,6 +9,7 @@ import { MainLayout } from '@/components/layouts/MainLayout';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 /* ─── data ───────────────────────────────────────────────── */
 const FEATURES = [
@@ -72,8 +73,9 @@ const STATS = [
 
 /* ─── component ───────────────────────────────────────────── */
 export default function Homepage() {
+  useDocumentTitle('Home');
   const navigate = useNavigate();
-  const { loginWithGitHub, user } = useAuth();
+  const { loginWithGitHub, user, authProvider } = useAuth();
   const [githubLoading, setGithubLoading] = useState(false);
   const [githubError, setGithubError] = useState('');
 
@@ -118,13 +120,20 @@ export default function Homepage() {
             >
               <Button
                 onClick={handleGitHub}
-                disabled={githubLoading}
+                disabled={githubLoading || authProvider === 'github'}
                 size="lg"
-                className="h-11 px-8 gap-3 bg-primary text-primary-foreground hover:bg-primary/90 text-base font-semibold shadow-lg glow-primary transition-all duration-300 hover:scale-105"
+                className={cn(
+                  "h-11 px-8 gap-3 text-base font-semibold shadow-lg transition-all duration-300",
+                  authProvider === 'github'
+                    ? "bg-secondary text-muted-foreground border border-border cursor-not-allowed"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90 glow-primary hover:scale-105"
+                )}
               >
                 <Github className="h-5 w-5" />
-                {githubLoading ? 'Connecting to GitHub…' : 'Integrate with GitHub'}
-                {!githubLoading && <ArrowRight className="h-4 w-4" />}
+                {authProvider === 'github'
+                  ? 'Integrated with GitHub'
+                  : (githubLoading ? 'Connecting to GitHub…' : 'Integrate with GitHub')}
+                {authProvider !== 'github' && !githubLoading && <ArrowRight className="h-4 w-4" />}
               </Button>
               <Button
                 variant="outline"
@@ -248,13 +257,20 @@ export default function Homepage() {
 
             <Button
               onClick={handleGitHub}
-              disabled={githubLoading}
+              disabled={githubLoading || authProvider === 'github'}
               size="lg"
-              className="w-full h-11 gap-3 bg-primary text-primary-foreground hover:bg-primary/90 text-base font-semibold shadow-lg glow-primary transition-all duration-300 hover:scale-105"
+              className={cn(
+                "w-full h-11 gap-3 text-base font-semibold shadow-lg transition-all duration-300",
+                authProvider === 'github'
+                  ? "bg-secondary text-muted-foreground border border-border cursor-not-allowed"
+                  : "bg-primary text-primary-foreground hover:bg-primary/90 glow-primary hover:scale-105"
+              )}
             >
               <Github className="h-5 w-5" />
-              {githubLoading ? 'Redirecting to GitHub…' : 'Integrate with GitHub'}
-              {!githubLoading && <ArrowRight className="h-4 w-4" />}
+              {authProvider === 'github'
+                ? 'Integrated with GitHub'
+                : (githubLoading ? 'Redirecting to GitHub…' : 'Integrate with GitHub')}
+              {authProvider !== 'github' && !githubLoading && <ArrowRight className="h-4 w-4" />}
             </Button>
 
             {githubError && (
