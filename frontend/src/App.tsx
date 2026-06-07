@@ -19,6 +19,9 @@ import Settings from "./pages/Settings/Settings";
 import NotFound from "./pages/NotFound";
 import Homepage from "./pages/Homepage/Homepage";
 import AcceptInvite from "./pages/Repositories/AcceptInvite";
+import TermsOfService from "./pages/Legal/TermsOfService";
+import PrivacyPolicy from "./pages/Legal/PrivacyPolicy";
+
 
 
 const queryClient = new QueryClient({
@@ -58,6 +61,8 @@ const App = () => (
                 <Route path="/risk-overview" element={<RiskOverview />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/homepage" element={<Homepage />} />
+                <Route path="/terms" element={<TermsOfService />} />
+                <Route path="/privacy" element={<PrivacyPolicy />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>

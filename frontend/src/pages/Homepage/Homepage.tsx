@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Github, Zap, Shield, GitBranch, BarChart3,
   Network, Waves, ArrowRight, CheckCircle2, Star, ChevronRight,
@@ -279,9 +279,9 @@ export default function Homepage() {
 
             <p className="mt-4 text-xs text-muted-foreground">
               By continuing, you agree to our{' '}
-              <a href="#" className="text-primary hover:underline">Terms of Service</a>
+              <Link to="/terms" className="text-primary hover:underline">Terms of Service</Link>
               {' '}and{' '}
-              <a href="#" className="text-primary hover:underline">Privacy Policy</a>
+              <Link to="/privacy" className="text-primary hover:underline">Privacy Policy</Link>
             </p>
           </div>
         </section>

@@ -577,6 +577,12 @@ export async function wipeUserData(userId: string): Promise<void> {
       await Promise.all(ciSnap.docs.map(d => deleteDoc(d.ref)));
       // Delete the repository document itself
       await deleteDoc(repoDoc.ref);
+      // Delete global repo_owners mapping
+      try {
+        await deleteDoc(doc(db, 'repo_owners', repoDoc.id));
+      } catch (e) {
+        console.error('[FirebaseService] Failed to delete repo_owner mapping', e);
+      }
     })
   );
   // Wipe parent doc

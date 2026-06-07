@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Github, Zap, Shield, GitCommit, ArrowRight, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -233,9 +233,9 @@ export default function Login() {
 
               <p className="mt-6 text-center text-xs text-muted-foreground">
                 By continuing, you agree to our{' '}
-                <a href="#" className="text-primary hover:underline">Terms of Service</a>
+                <Link to="/terms" className="text-primary hover:underline">Terms of Service</Link>
                 {' '}and{' '}
-                <a href="#" className="text-primary hover:underline">Privacy Policy</a>
+                <Link to="/privacy" className="text-primary hover:underline">Privacy Policy</Link>
               </p>
             </div>
           </div>
