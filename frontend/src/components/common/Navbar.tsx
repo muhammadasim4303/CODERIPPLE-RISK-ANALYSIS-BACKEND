@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, User, LogOut, CheckCircle2, MessageCircle } from 'lucide-react';
+import { Search, User, LogOut, CheckCircle2, MessageCircle, Menu } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
@@ -24,23 +24,31 @@ interface NavbarProps {
 
 export function Navbar({ title }: NavbarProps) {
   const { user, logout } = useAuth();
-  const { sidebarOpen } = useApp();
+  const { sidebarOpen, setSidebarOpen } = useApp();
 
   return (
     <header
       className={cn(
-        'fixed right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 backdrop-blur-xl px-6 transition-all duration-300',
-        sidebarOpen ? 'left-64' : 'left-16'
+        'fixed right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/80 backdrop-blur-xl px-4 sm:px-6 transition-all duration-300',
+        sidebarOpen ? 'left-0 md:left-64' : 'left-0 md:left-16'
       )}
     >
       {/* Left: Title/Search */}
-      <div className="flex items-center gap-4">
-        {title && <h2 className="text-lg font-semibold text-foreground">{title}</h2>}
-        <div className="relative">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="md:hidden text-foreground shrink-0"
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+        {title && <h2 className="text-sm sm:text-lg font-semibold text-foreground truncate shrink-0">{title}</h2>}
+        <div className="relative hidden xs:block">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search repositories, commits..."
-            className="w-72 bg-secondary/50 pl-10 text-sm border-border focus:ring-primary"
+            placeholder="Search..."
+            className="w-24 sm:w-48 md:w-72 bg-secondary/50 pl-10 text-sm border-border focus:ring-primary transition-all"
           />
         </div>
       </div>

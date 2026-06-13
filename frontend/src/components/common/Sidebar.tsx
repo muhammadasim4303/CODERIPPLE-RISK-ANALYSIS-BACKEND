@@ -31,8 +31,8 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300',
-        sidebarOpen ? 'w-64' : 'w-16'
+        'fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 md:translate-x-0',
+        sidebarOpen ? 'w-64 translate-x-0' : 'w-16 -translate-x-full md:w-16'
       )}
     >
       {/* Logo */}
@@ -57,6 +57,11 @@ export function Sidebar() {
           const linkContent = (
             <Link
               to={item.path}
+              onClick={() => {
+                if (window.innerWidth < 768) {
+                  setSidebarOpen(false);
+                }
+              }}
               className={cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
                 isActive
