@@ -7,7 +7,6 @@ import { analyzeCommit, type RiskResult } from '@/lib/flaskService';
 import { upsertRiskScore, getRiskScore, deleteRiskScore, type FBRiskScore } from '@/lib/firebaseService';
 import { RiskBadge, RiskScoreBar } from '@/components/common/RiskBadge';
 import { RiskRadarChart } from '@/components/charts/RiskRadarChart';
-import { DependencyGraph } from '@/components/graphs/DependencyGraph';
 import { PageLoader } from '@/components/common/Loader';
 import { Button } from '@/components/ui/button';
 import {
@@ -178,20 +177,7 @@ export default function CommitDetails() {
   const committedAt = commit?.commit.author.date ?? '';
   const files = commit?.files ?? [];
 
-  // Build simple dependency graph from files
-  const depGraph = {
-    nodes: files.slice(0, 6).map((f, i) => ({
-      id: String(i + 1),
-      label: f.filename.split('/').pop() ?? f.filename,
-      type: (i === 0 ? 'source' : f.additions > f.deletions ? 'impacted' : 'unaffected') as 'source' | 'impacted' | 'unaffected',
-      risk_score: risk ? risk.overall_risk_score * (1 - i * 0.1) : undefined,
-    })),
-    edges: files.slice(1, 6).map((_, i) => ({
-      source: '1',
-      target: String(i + 2),
-      relationship: 'modifies',
-    })),
-  };
+
 
   return (
     <MainLayout>
@@ -317,18 +303,7 @@ export default function CommitDetails() {
               </div>
             )}
 
-            {/* Dependency graph */}
-            {files.length > 0 && (
-              <div className="glass-card rounded-xl p-6 animate-slide-up [animation-delay:200ms]">
-                <h3 className="mb-4 text-lg font-semibold">Change Impact Graph</h3>
-                <DependencyGraph data={depGraph} />
-                <div className="mt-4 flex items-center gap-6 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-node-source" />Source</span>
-                  <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-node-impacted" />Impacted</span>
-                  <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-node-default" />Unaffected</span>
-                </div>
-              </div>
-            )}
+
           </div>
 
           {/* Right — files & stats */}
@@ -396,24 +371,30 @@ export default function CommitDetails() {
             )}
 
             {/* Patch preview */}
-            {(selectedFilename ? files.find(f => f.filename === selectedFilename) : files[0])?.patch && (
+            {files.length > 0 && (
               <div className="glass-card rounded-xl p-6 animate-slide-up [animation-delay:350ms]">
                 <h3 className="mb-4 font-semibold flex items-center justify-between">
                   <span>Patch Preview</span>
                   {selectedFilename && <span className="text-xs font-normal text-muted-foreground truncate ml-4" title={selectedFilename}>{selectedFilename}</span>}
                 </h3>
-                <pre className="max-h-64 overflow-auto rounded-lg bg-background/80 p-4 text-xs font-mono scrollbar-thin">
-                  {(selectedFilename ? files.find(f => f.filename === selectedFilename) : files[0])!.patch!.split('\n').map((line, i) => (
-                    <div key={i} className={cn(
-                      'py-0.5 px-2 -mx-2',
-                      line.startsWith('+') && !line.startsWith('+++') && 'diff-add',
-                      line.startsWith('-') && !line.startsWith('---') && 'diff-remove',
-                      line.startsWith('@@') && 'text-muted-foreground',
-                    )}>
-                      {line}
-                    </div>
-                  ))}
-                </pre>
+                {(selectedFilename ? files.find(f => f.filename === selectedFilename) : files[0])?.patch ? (
+                  <pre className="max-h-64 overflow-auto rounded-lg bg-background/80 p-4 text-xs font-mono scrollbar-thin">
+                    {(selectedFilename ? files.find(f => f.filename === selectedFilename) : files[0])!.patch!.split('\n').map((line, i) => (
+                      <div key={i} className={cn(
+                        'py-0.5 px-2 -mx-2',
+                        line.startsWith('+') && !line.startsWith('+++') && 'diff-add',
+                        line.startsWith('-') && !line.startsWith('---') && 'diff-remove',
+                        line.startsWith('@@') && 'text-muted-foreground',
+                      )}>
+                        {line}
+                      </div>
+                    ))}
+                  </pre>
+                ) : (
+                  <div className="rounded-lg bg-secondary/30 p-4 text-xs text-muted-foreground text-center">
+                    File too large for inline patch (GitHub API omitted details)
+                  </div>
+                )}
               </div>
             )}
           </div>

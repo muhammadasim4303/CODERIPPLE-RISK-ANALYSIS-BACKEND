@@ -64,6 +64,9 @@ function formatNodeLabel(rawLabel: string, nodeId: string, category: string): st
 }
 
 function buildGraphData(score: FBRiskScore) {
+  if (!score.cr_analyzed) {
+    return { nodes: [], edges: [] };
+  }
   if (score.cr_dependency_graph?.nodes?.length) {
     const { nodes, edges } = score.cr_dependency_graph;
     return {
@@ -447,12 +450,20 @@ export default function ChangeImpact() {
                         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-node-default" />Indirect</span>
                       </div>
                     </div>
-                    {depGraph.nodes.length > 0
-                      ? <DependencyGraph data={depGraph} className="h-[320px]" />
-                      : <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
+                    {!selected.cr_analyzed ? (
+                      <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
+                        <div className="text-center">
+                          <Network className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                          run coderipple analysis to see graph
+                        </div>
+                      </div>
+                    ) : depGraph.nodes.length > 0 ? (
+                      <DependencyGraph data={depGraph} className="h-[320px]" />
+                    ) : (
+                      <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">
                         <div className="text-center"><Network className="h-8 w-8 mx-auto mb-2 opacity-30" />No dependency data available</div>
                       </div>
-                    }
+                    )}
                     {(selected.cr_impacted_files ?? []).length > 0 && (
                       <div className="mt-4 pt-4 border-t border-border">
                         <p className="text-xs font-medium text-muted-foreground mb-2">Impacted Files</p>

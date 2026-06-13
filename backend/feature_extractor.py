@@ -72,7 +72,7 @@ def is_sensitive_file(filename: str) -> bool:
         return True
     if ext in _SENSITIVE_EXT_PATTERNS:
         return True
-    return any(pat in fname for pat in _SENSITIVE_NAME_PATTERNS)
+    return any(pat in base for pat in _SENSITIVE_NAME_PATTERNS)
 
 
 def is_critical_file(filename: str) -> bool:

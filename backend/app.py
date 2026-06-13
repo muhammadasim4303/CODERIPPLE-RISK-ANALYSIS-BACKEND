@@ -162,16 +162,15 @@ def _has_critical_signals(features: dict) -> bool:
 def run_prediction(features: dict) -> dict:
     meta = features.get("_meta", {})
 
-    #  1. Sensitive-file / hardcoded-secret override (always wins) 
-    if meta.get("critical_security_flag", 0) > 0 or meta.get("sensitive_file_names"):
+    #  1. Sensitive-file override (always wins) 
+    if meta.get("sensitive_file_names"):
         return {
             "pred_risk_score": 1.0,
             "pred_risk_label": "HIGH RISK",
             "pred_confidence": 0.99,
             "probabilities": {"HIGH RISK": 0.99, "MEDIUM RISK": 0.01, "LOW RISK": 0.00},
             "mode": "rule:critical_security",
-            "override_reason": "HIGH: Hardcoded secret, API key, password, SQL injection, "
-                               "or sensitive file detected",
+            "override_reason": "HIGH: Sensitive file (.env or private key) detected",
         }
 
     #  2. Initial commit 
@@ -472,8 +471,14 @@ def analyze_batch():
     all_features = []
 
     for f in generated_files:
+        fname = f.get("filename", f.get("file", ""))
+        is_gen = is_generated_file(fname)
+        reason = (
+            "Generated or compiled file — skipped" if is_gen
+            else "File too large for inline patch (GitHub API omitted details)"
+        )
         results.append({
-            "file":                    f.get("filename", f.get("file", "")),
+            "file":                    fname,
             "patch":                   f.get("patch", ""),
             "risk_score":              0.05,
             "risk_label":              "LOW RISK",
@@ -485,10 +490,10 @@ def analyze_batch():
             "security_reasons":        [],
             "maintainability_reasons": [],
             "integration_reasons":     [],
-            "risk_reasons":            ["Generated or compiled file — skipped"],
+            "risk_reasons":            [reason],
             "added_lines":             f.get("additions", 0),
             "removed_lines":           f.get("deletions", 0),
-            "is_generated":            True,
+            "is_generated":            is_gen,
         })
 
     for file_data in code_files:

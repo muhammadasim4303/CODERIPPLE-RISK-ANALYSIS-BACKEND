@@ -21,28 +21,12 @@ def generate_risk_reasons(features: dict, risk_label: str, risk_score: float, mo
             "Credentials or secrets may be exposed!"
         )
 
-    if meta.get("critical_security_flag"):
-        reasons.append("HIGH: Genuine hardcoded secret, API key, or SQL injection pattern detected in code")
-
-    #  Security 
-    sec_hits = features.get("security_pattern_hits", 0)
-    if sec_hits >= 15:
-        reasons.append(
-            f"Concentration of security-sensitive patterns "
-            f"({sec_hits} hits) — auth, credentials, SQL patterns present"
-        )
-    elif sec_hits > 0:
-        reasons.append(
-            f"Security-sensitive keywords detected "
-            f"({sec_hits} hits) — auth/token/password/SQL patterns present"
-        )
-
     if meta.get("critical_file_names"):
         names = ", ".join(meta["critical_file_names"][:3])
         reasons.append(f"Critical/core files modified: {names}")
 
     #  High-danger combos 
-    if (sec_hits >= 5 and
+    if (sensitive_files and
             features.get("no_test_coverage", 0) and
             features.get("critical_files_count", 0) > 0):
         reasons.append(
@@ -127,20 +111,8 @@ def derive_risk_categories(features: dict, mode: str = "model") -> dict:
     sensitive_files = meta.get("sensitive_file_names", [])
     if sensitive_files:
         sec = 1.0
-    elif meta.get("critical_security_flag"):
-        sec = 1.0
     else:
-        sec_hits = features.get("security_pattern_hits", 0)
-        # Use hit density relative to diff size
-        hit_density = min(0.4, sec_hits / (diff_size + 10))
-        sec = min(0.75, (
-            hit_density          * 1.2 +
-            min(sec_hits, 20)    * 0.015 +
-            features.get("critical_files_count", 0) * 0.12 +
-            features.get("has_new_deps", 0)  * 0.04
-        ))
-        # CAP: Stay below 0.75 unless genuine critical flag is set
-        sec = min(sec, 0.75)
+        sec = 0.0
 
     #  Correctness 
     cyc_delta   = max(0, features.get("cyclomatic_complexity_delta", 0))
@@ -178,13 +150,6 @@ def derive_risk_categories(features: dict, mode: str = "model") -> dict:
     if sensitive_files:
         names = ", ".join(sensitive_files[:3])
         sec_reasons.append(f"CRITICAL: Sensitive file(s) ({names}) — credentials likely exposed")
-    elif meta.get("critical_security_flag"):
-        sec_reasons.append("CRITICAL: Hardcoded secret or injectable SQL detected")
-    elif features.get("security_pattern_hits", 0) > 0:
-        sec_reasons.append(f"Security-sensitive keywords ({features['security_pattern_hits']} hits)")
-    
-    if features.get("critical_files_count", 0) > 0:
-        sec_reasons.append("Project-critical files modified")
 
     cor_reasons = []
     if features.get("no_test_coverage", 0):
