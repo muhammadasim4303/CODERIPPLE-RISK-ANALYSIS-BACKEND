@@ -293,8 +293,8 @@ export default function Homepage() {
         <div className="mx-auto max-w-7xl px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-                <Zap className="h-4 w-4 text-primary" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 overflow-hidden p-0.5">
+                <img src="/logo 1.png" alt="CodeRipple" className="h-full w-full object-contain" />
               </div>
               <div>
                 <p className="text-sm font-bold"><span className="gradient-text">CodeRipple</span></p>

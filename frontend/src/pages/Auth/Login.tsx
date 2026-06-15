@@ -87,8 +87,8 @@ export default function Login() {
         <div className="hidden lg:flex lg:w-1/2 flex-col justify-center px-12 xl:px-20">
           <div className="max-w-lg">
             <div className="mb-8 flex items-center gap-3">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-                <Zap className="h-7 w-7 text-primary" />
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20 overflow-hidden p-1.5">
+                <img src="/logo 1.png" alt="CodeRipple" className="h-full w-full object-contain" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold"><span className="gradient-text">CodeRipple</span></h1>
@@ -123,8 +123,8 @@ export default function Login() {
         <div className="flex w-full lg:w-1/2 items-center justify-center px-4 py-12">
           <div className="w-full max-w-md">
             <div className="mb-8 text-center lg:hidden">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-                <Zap className="h-8 w-8 text-primary" />
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20 overflow-hidden p-1.5">
+                <img src="/logo 1.png" alt="CodeRipple" className="h-full w-full object-contain" />
               </div>
               <h1 className="text-3xl font-bold tracking-tight"><span className="gradient-text">CodeRipple</span></h1>
               <p className="mt-2 text-muted-foreground">AI-Powered Commit Risk Analyzer</p>

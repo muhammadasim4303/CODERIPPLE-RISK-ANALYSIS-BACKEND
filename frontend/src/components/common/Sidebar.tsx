@@ -37,8 +37,8 @@ export function Sidebar() {
     >
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-          <Zap className="h-5 w-5 text-primary" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg overflow-hidden bg-primary/5 p-0.5">
+          <img src="/logo 1.png" alt="CodeRipple" className="h-full w-full object-contain" />
         </div>
         {sidebarOpen && (
           <div className="animate-fade-in">
